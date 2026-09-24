@@ -1,0 +1,17 @@
+## Interface: 16001, 120105
+## Title: |cff4fd1c5Kraken|rfriends
+## Notes: Your journey with a friend: kills by creature type, rares, bosses, dungeon runs, loot and gold. Everything you do together, counted.
+## Author: Bernhard
+## Version: 1.0.0
+## IconTexture: Interface\Icons\Achievement_Reputation_01
+## AddonCompartmentFunc: Krakenfriends_OnAddonCompartmentClick
+## SavedVariables: KrakenfriendsDB
+## SavedVariablesPerCharacter: KrakenfriendsCharDB
+
+Restore.lua
+Core.lua
+Data.lua
+Identity.lua
+Tracker.lua
+UI.lua
+Minimap.lua

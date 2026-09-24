@@ -1,0 +1,7 @@
+-- Krakenfriends beta safety net.
+--
+-- The WoW: Forever beta writes SavedVariables to disk but does not load them
+-- back on the next launch. tools\Restore-Journey.cmd copies your latest save
+-- into this file (as KrakenfriendsRestore), and Core.lua picks it up at login.
+--
+-- Leave this file as-is if you are not on the beta.
