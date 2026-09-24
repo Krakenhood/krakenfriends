@@ -74,7 +74,6 @@ function Object:SetScript(name, fn) self._scripts[name] = fn end
 function Object:GetScript(name) return self._scripts[name] end
 function Object:HookScript(name, fn) self._scripts[name] = fn end
 function Object:RegisterEvent(e)
-    if e:match("^COMBAT_LOG") then return end -- forbidden, silently
     if not KNOWN_EVENTS[e] then error("unknown event " .. e) end
     self._events[e] = true
     eventFrames[self] = true
@@ -218,13 +217,17 @@ C_Item = {
 }
 C_Texture = { GetAtlasInfo = function(a) if a:find("^classicon") then return nil end return { width = 1 } end }
 C_AddOns = { GetAddOnMetadata = function() return "1.0.0-test" end }
-function GetInstanceInfo() return INSTANCE.name, INSTANCE.type, 0, "", 5, 0, false, INSTANCE.id, 0, nil, false end
+function GetInstanceInfo() return INSTANCE.name, INSTANCE.type, INSTANCE.diff or 1, "", 5, 0, false, INSTANCE.id, 0, nil, false end
 function GetRealZoneText() return ZONE end
 function SetPortraitTexture() end
+CLEU = {}
+function CombatLogGetCurrentEventInfo() return table.unpack(CLEU, 1, 11) end
+function GetDifficultyInfo(id) return "Difficulty", "party", id == 174 end
+function FireCLEU(sub, src, dst, dstName) CLEU = { 1, sub, false, src, "src", 0, 0, dst, dstName, 0, 0 }; FireEvent("COMBAT_LOG_EVENT_UNFILTERED") end
 
 KNOWN_EVENTS = {}
 for e in ([[ADDON_LOADED PLAYER_LOGIN PLAYER_LOGOUT PLAYER_ENTERING_WORLD GROUP_ROSTER_UPDATE UNIT_CONNECTION
 BN_FRIEND_INFO_CHANGED PARTY_KILL UNIT_DIED PLAYER_TARGET_DIED PLAYER_TARGET_CHANGED UPDATE_MOUSEOVER_UNIT
 NAME_PLATE_UNIT_ADDED UNIT_THREAT_LIST_UPDATE UNIT_TARGET PLAYER_REGEN_DISABLED PLAYER_REGEN_ENABLED CHAT_MSG_LOOT
 CHAT_MSG_MONEY CHAT_MSG_SYSTEM ENCOUNTER_START ENCOUNTER_END BOSS_KILL PLAYER_DEAD UNIT_HEALTH PLAYER_LEVEL_UP
-UNIT_LEVEL QUEST_TURNED_IN ZONE_CHANGED_NEW_AREA]]):gmatch("%S+") do KNOWN_EVENTS[e] = true end
+UNIT_LEVEL QUEST_TURNED_IN ZONE_CHANGED_NEW_AREA COMBAT_LOG_EVENT_UNFILTERED UNIT_PET]]):gmatch("%S+") do KNOWN_EVENTS[e] = true end

@@ -266,17 +266,42 @@ check(text:find("Thalianne") ~= nil, "scoped header shows the chapter's characte
 print("  [journal, main chapter] " .. text:sub(1, 300))
 UI.scope = nil
 
-section("save + restore (beta safety net)")
+section("combat log (TBC)")
+local before = s.kills
+UNITS.pet = { guid = "Pet-0-1-0-1-1860-00000001", name = "Voidwalker" }
+KF.Tracker:RefreshOurGUIDs()
+local CLMOB = "Creature-0-1-0-1-2956-00000200"
+FireCLEU("SPELL_DAMAGE", "Pet-0-1-0-1-1860-00000001", CLMOB, "Adult Plainstrider")
+FireCLEU("UNIT_DIED", nil, CLMOB, "Adult Plainstrider")
+Advance(1)
+check(s.kills == before + 1, "pet-damaged mob dying via combat log counts")
+check(KF:CurrentPair().mobs[2956] and KF:CurrentPair().mobs[2956].n == "Adult Plainstrider", "name taken from the combat log")
+local CLMOB2 = "Creature-0-1-0-1-2957-00000201"
+FireCLEU("PARTY_KILL", PARTNER, CLMOB2, "Elder Plainstrider")
+FireEvent("PARTY_KILL", PARTNER, CLMOB2)
+check(s.kills == before + 2, "combat log + standalone PARTY_KILL count once")
+local OTHER = "Creature-0-1-0-1-2958-00000202"
+FireCLEU("SPELL_DAMAGE", "Player-1-0000FFFF", OTHER, "Someone's Mob")
+FireCLEU("UNIT_DIED", nil, OTHER, "Someone's Mob")
+Advance(1)
+check(s.kills == before + 2, "strangers' kills are ignored")
+
+section("heroic run (TBC)")
+INSTANCE = { name = "The Deadmines", type = "party", id = 36, diff = 174 }
+FireEvent("ZONE_CHANGED_NEW_AREA")
+check(KF.journey.currentRun and KF.journey.currentRun.n == "The Deadmines (Heroic)", "heroic run labelled")
+check(KF:CurrentPair().dungeons["36:heroic"] ~= nil and KF:CurrentPair().dungeons[36] == nil and P().dungeons[36].runs == 1, "heroic counted apart from normal")
+INSTANCE = { name = "Westfall", type = "none", id = 0 }
+FireEvent("ZONE_CHANGED_NEW_AREA")
+FireEvent("CHAT_MSG_SYSTEM", "The Deadmines has been reset.")
+check(KF.journey.currentRun == nil, "instance reset ends the heroic run")
+
+section("save")
 FireEvent("PLAYER_LOGOUT")
-check(KrakenfriendsDB.savedAt == NOW and KrakenfriendsCharDB == KrakenfriendsDB, "saved to both globals")
-local snapshot = KrakenfriendsDB
-KrakenfriendsDB, KrakenfriendsCharDB, KrakenfriendsRestore = nil, nil, snapshot
+check(KrakenfriendsDB.savedAt == NOW and KrakenfriendsDB == KF.db, "saved")
+local saved = KrakenfriendsDB
 KF:LoadDB()
-check(KF.dbSource == "restore" and KF.db.journeys["Thalia#1234"].total.kills == s.kills, "restore file picked up")
-local older = CopyTable(snapshot); older.savedAt = 1
-KrakenfriendsDB, KrakenfriendsCharDB, KrakenfriendsRestore = snapshot, nil, older
-KF:LoadDB()
-check(KF.dbSource == "account", "newer account save wins over a stale restore")
+check(KF.dbSource == "account" and KF.db == saved, "reloads the account save")
 
 section("helpers")
 check(KF.Tracker.toPattern("%s receives loot: %sx%d.", true) == "^(.-) receives loot: (.-)x(%d+)%.$", "pattern conversion")

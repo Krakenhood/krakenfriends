@@ -10,10 +10,11 @@ KF.version = (C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetada
 --------------------------------------------------------------------------------
 -- Secret-value safety
 --
--- Forever runs the Midnight "secret values" system: some reads come back as
--- opaque values that throw on arithmetic, comparison and even ==. The only
--- safe test is issecretvalue(), so every value we read from the game goes
--- through clean() before we look at it, and API calls go through call().
+-- Modern clients (the Anniversary one included) ship the "secret values"
+-- system: some reads can come back as opaque values that throw on
+-- arithmetic, comparison and even ==. The only safe test is issecretvalue(),
+-- so every value we read from the game goes through clean() before we look
+-- at it, and API calls go through call().
 --------------------------------------------------------------------------------
 
 local issecretvalue = issecretvalue
@@ -290,12 +291,7 @@ function KF:CheckMilestones()
 end
 
 --------------------------------------------------------------------------------
--- SavedVariables
---
--- The live game keeps KrakenfriendsDB (account-wide). The same table is also
--- mirrored into KrakenfriendsCharDB, and tools\Restore-Journey can feed a copy
--- back in as KrakenfriendsRestore: both exist because the Forever beta does
--- not read SavedVariables back. At load we take whichever snapshot is newest.
+-- SavedVariables: one account-wide table, so all your characters share it.
 --------------------------------------------------------------------------------
 
 local DEFAULTS = {
@@ -305,26 +301,15 @@ local DEFAULTS = {
 }
 
 function KF:LoadDB()
-    local db, source
-    local candidates = {
-        { KrakenfriendsDB, "account" },
-        { KrakenfriendsCharDB, "character" },
-        { KrakenfriendsRestore, "restore" },
-    }
-    for _, c in ipairs(candidates) do
-        local t = c[1]
-        if type(t) == "table" and type(t.journeys) == "table" then
-            if not db or (t.savedAt or 0) > (db.savedAt or 0) then db, source = t, c[2] end
-        end
+    local db, source = KrakenfriendsDB, "account"
+    if type(db) ~= "table" or type(db.journeys) ~= "table" then
+        db, source = { created = time() }, "new"
     end
-    if not db then db, source = { created = time() }, "new" end
-
     fill(db, DEFAULTS)
     db.created = db.created or time()
     db.version = DB_VERSION
     for _, j in pairs(db.journeys) do upgradeJourney(j) end
-
-    KrakenfriendsDB, KrakenfriendsCharDB, KrakenfriendsRestore = db, db, nil
+    KrakenfriendsDB = db
     self.db, self.dbSource = db, source
 end
 
@@ -511,15 +496,10 @@ KF:On("PLAYER_LOGIN", function()
     KF:InitPlayer()
     KF.ready = true
     KF:Fire("LOGIN")
-    if KF.dbSource == "restore" or KF.dbSource == "character" then
-        KF:Printf("restored your journeys from the %s backup (saved %s).", KF.dbSource,
-            date("%d %b %H:%M", KF.db.savedAt or time()))
-    end
 end)
 
 KF:On("PLAYER_LOGOUT", function()
     if not KF.db then return end
     KF:Fire("LOGOUT")
     KF.db.savedAt = time()
-    KrakenfriendsDB, KrakenfriendsCharDB = KF.db, KF.db
 end)

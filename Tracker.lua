@@ -15,10 +15,10 @@ local lastPartnerDeath = 0
 --------------------------------------------------------------------------------
 -- Reading units
 --
--- Forever has no combat log for addons. Kills come from the PARTY_KILL and
--- UNIT_DIED events, which only carry GUIDs, so we remember what each hostile
--- unit was (name, creature type, rank) while it's visible as a target,
--- nameplate or mouseover, and whether it was fighting one of us.
+-- Kills come from PARTY_KILL and UNIT_DIED (as standalone events and from the
+-- combat log), which only carry GUIDs, so we remember what each hostile unit
+-- was (name, creature type, rank) while it's visible as a target, nameplate
+-- or mouseover, and whether it was fighting one of us.
 --------------------------------------------------------------------------------
 
 local function guidParts(guid)
@@ -223,6 +223,66 @@ function T:OnUnitDied(guid)
     C_Timer.After(0.3, function() T:RecordKill(guid, nil, "UNIT_DIED") end)
 end
 
+--------------------------------------------------------------------------------
+-- Combat log (available to addons on the Anniversary client). Damage from
+-- you, your partner or your pets marks a mob as ours right away, and kills
+-- arrive with the victim's name even if it never had a nameplate.
+--------------------------------------------------------------------------------
+
+local getCombatInfo = CombatLogGetCurrentEventInfo or (C_CombatLog and C_CombatLog.GetCurrentEventInfo)
+local DAMAGE = { SWING_DAMAGE = true, RANGE_DAMAGE = true, SPELL_DAMAGE = true, SPELL_PERIODIC_DAMAGE = true, DAMAGE_SHIELD = true }
+local ourGUIDs = {}
+
+-- refreshed on the heartbeat and when pets change; the combat log is too busy
+-- to look these up per event
+function T:RefreshOurGUIDs()
+    wipe(ourGUIDs)
+    local function add(guid) if guid then ourGUIDs[guid] = true end end
+    local p = KF.partner
+    add(KF.me and KF.me.guid)
+    add(call(UnitGUID, "pet"))
+    if p then
+        add(p.guid)
+        add(KF:PartnerPetGUID())
+    end
+end
+
+local function remember(guid, name)
+    local info = mobs[guid]
+    if info then
+        info.name = info.name or name
+        return info
+    end
+    local unit = UnitTokenFromGUID and call(UnitTokenFromGUID, guid)
+    info = unit and T:ScanUnit(unit)
+    if info then return info end
+    local kind, npc = guidParts(guid)
+    if kind ~= "Creature" and kind ~= "Vehicle" and kind ~= "Pet" and kind ~= "Player" then return end
+    info = { name = name, npc = npc, type = kind == "Player" and "player" or "unknown", seen = time() }
+    mobs[guid] = info
+    return info
+end
+
+function T:OnCombatLog()
+    if not (KF.partner and getCombatInfo) then return end
+    local _, sub, _, srcGUID, _, _, _, dstGUID, dstName = getCombatInfo()
+    sub, srcGUID, dstGUID = clean(sub), clean(srcGUID), clean(dstGUID)
+    if not (sub and dstGUID) then return end
+    if sub == "PARTY_KILL" then
+        remember(dstGUID, clean(dstName))
+        self:OnPartyKill(srcGUID, dstGUID)
+    elseif sub == "UNIT_DIED" then
+        self:OnUnitDied(dstGUID)
+    elseif DAMAGE[sub] and srcGUID and ourGUIDs[srcGUID] and not ourGUIDs[dstGUID] then
+        local info = remember(dstGUID, clean(dstName))
+        if info and not info.engaged then
+            local unit = UnitTokenFromGUID and call(UnitTokenFromGUID, dstGUID)
+            if not (unit and call(UnitIsTapDenied, unit)) then info.engaged = true end
+        end
+        if info then info.seen = time() end
+    end
+end
+
 function T:OnTargetDied()
     if not KF.partner then return end
     local guid = call(UnitGUID, "target")
@@ -376,10 +436,16 @@ end
 function T:CheckInstance()
     local j = KF.journey
     if not j then return end
-    local ok, name, itype, _, _, _, _, _, instanceID = pcall(GetInstanceInfo)
+    local ok, name, itype, difficulty, _, _, _, _, instanceID = pcall(GetInstanceInfo)
     if not ok then return end
-    name, itype, instanceID = clean(name), clean(itype), clean(instanceID)
-    local dungeon = (itype == "party" or itype == "raid") and instanceID or nil
+    name, itype, difficulty, instanceID = clean(name), clean(itype), clean(difficulty), clean(instanceID)
+    local dungeon, label
+    if (itype == "party" or itype == "raid") and instanceID then
+        -- heroic dungeons are counted separately from normal ones
+        local _, _, heroic = call(GetDifficultyInfo, difficulty)
+        dungeon = heroic and (instanceID .. ":heroic") or instanceID
+        label = heroic and ((name or "?") .. " (Heroic)") or name
+    end
     local run, now = j.currentRun, time()
 
     if run then
@@ -393,15 +459,15 @@ function T:CheckInstance()
         end
     end
     if dungeon and not run and KF.partner then
-        self:StartRun(j, dungeon, name)
+        self:StartRun(j, dungeon, label, name)
     end
 end
 
-function T:StartRun(j, id, name)
+function T:StartRun(j, id, name, zoneName)
     local pair, pairKey = KF:CurrentPair()
     if not pair then return end
     local now = time()
-    j.currentRun = { id = id, n = name, pair = pairKey, start = now, last = now, inside = true, kills = 0, bosses = 0, deaths = 0 }
+    j.currentRun = { id = id, n = name, zone = zoneName, pair = pairKey, start = now, last = now, inside = true, kills = 0, bosses = 0, deaths = 0 }
     KF:Add("runs")
     local d = pair.dungeons[id]
     if not d then
@@ -437,7 +503,7 @@ function T:OnSystemMessage(text)
     local j = KF.journey
     local run = j and j.currentRun
     if not (text and run and P.reset) or run.inside then return end
-    if text:match(P.reset) == run.n then self:FinishRun(j) end
+    if text:match(P.reset) == (run.zone or run.n) then self:FinishRun(j) end
 end
 
 --------------------------------------------------------------------------------
@@ -540,6 +606,7 @@ local function heartbeat()
     local elapsed = now - lastTick
     lastTick = now
     KF:UpdateTogether()
+    T:RefreshOurGUIDs()
     -- skip long gaps (loading screens) rather than guess
     if KF.together and elapsed < 10 then KF:Add("time", elapsed) end
     ticks = ticks + 1
@@ -569,7 +636,10 @@ KF:Listen("TOGETHER", function(together)
     end
 end)
 
-KF:Listen("PARTNER", function() T:CheckInstance() end)
+KF:Listen("PARTNER", function()
+    T:RefreshOurGUIDs()
+    T:CheckInstance()
+end)
 
 --------------------------------------------------------------------------------
 
@@ -586,6 +656,8 @@ end
 KF:On("PARTY_KILL", whenReady(function(a, t) T:OnPartyKill(a, t) end))
 KF:On("UNIT_DIED", whenReady(function(guid) T:OnUnitDied(guid) end))
 KF:On("PLAYER_TARGET_DIED", whenReady(function() T:OnTargetDied() end))
+KF:On("COMBAT_LOG_EVENT_UNFILTERED", whenReady(function() T:OnCombatLog() end))
+KF:On("UNIT_PET", whenReady(function() T:RefreshOurGUIDs() end))
 
 KF:On("PLAYER_TARGET_CHANGED", whenReady(function() scanWithPartner("target") end))
 KF:On("UPDATE_MOUSEOVER_UNIT", whenReady(function() scanWithPartner("mouseover") end))
