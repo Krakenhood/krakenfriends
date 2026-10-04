@@ -56,11 +56,3 @@ Then type `/kf` in game, or click the minimap button (or the addon compartment e
 - **One partner at a time.** Several journeys (one per friend) are supported, but only one partner is tracked at once, and the start-a-journey prompt appears only in a two-person group. Use `/kf partner Name` in bigger groups.
 - **Untested at scale.** Verified with a headless test suite and by the author in the Forever beta; boss detection, heavy combat performance and unusual group setups haven't been tested widely. Bug reports are welcome in the issue tracker.
 
-## Beta safety net (beta only)
-
-The Forever beta (1.60.x) writes SavedVariables to disk but **does not load them back** on the next launch: a known beta bug. Until it's fixed:
-
-1. Play as usual and log out normally.
-2. **Before the next launch**, double-click `tools\Restore-Journey.cmd`. It copies your latest save into the addon as `Restore.lua`, which Krakenfriends loads at login. Every save it sees is also kept in `WTF\Krakenfriends-Backups`.
-
-Krakenfriends also mirrors its data per character, so a `/reload` inside one session keeps your progress even on the beta. On the live game none of this is needed: the newest save always wins. If you carry the addon over from the beta and want a fresh start on live, clear out `Restore.lua` first (leave the file, empty it).
