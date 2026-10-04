@@ -47,6 +47,15 @@ Then type `/kf` in game, or click the minimap button (or the addon compartment e
 - **Gold together** counts both of your shares: shared loot is split evenly, so the duo's part of each split pile is twice yours.
 - **Storage** stays small. Counters are aggregated, and item names are stored once per item, not per drop.
 
+## Known issues and limits
+
+- **No sync between players.** The two copies of the addon don't talk to each other; each player keeps their own journal. Addon-to-addon messages are possible in WoW (`C_ChatInfo.SendAddonMessage`), but the Forever beta reports outgoing addon messages as restricted, and it's untested whether they're actually blocked. A sync (for example your friend's exact gold) needs a test between two real clients first.
+- **Quest counts can differ between two players.** The game only reports your own quest turn-ins, and a turn-in counts only while your partner is online and with you. If one of you logs off before the other hands in the same quest, the two counts differ by one until the next quest.
+- **"Gold together" is an estimate.** Group loot is split evenly, so the duo total is counted as twice your share.
+- **Creature types need a look at the creature.** A kill's type is read while it's your target, a nameplate or your mouseover. Anything never seen that way counts as "Unidentified".
+- **One partner at a time.** Several journeys (one per friend) are supported, but only one partner is tracked at once, and the start-a-journey prompt appears only in a two-person group. Use `/kf partner Name` in bigger groups.
+- **Untested at scale.** Verified with a headless test suite and by the author in the Forever beta; boss detection, heavy combat performance and unusual group setups haven't been tested widely. Bug reports are welcome in the issue tracker.
+
 ## Beta safety net (beta only)
 
 The Forever beta (1.60.x) writes SavedVariables to disk but **does not load them back** on the next launch: a known beta bug. Until it's fixed:
