@@ -7,6 +7,7 @@ A duo journey tracker for **World of Warcraft: Forever**. Turn it on, group up w
 - **Dungeon runs**: per dungeon, bosses, time inside, recent runs
 - **Loot** by quality (gray to legendary), with names kept for green and better
 - **Gold looted** together and your own share
+- **Records**: your biggest hit and biggest crit, and your friend's, with the spell and the target (a pop-up announces a new crit record)
 - **Trivia**: time together, quests, levels gained, zones explored, most hunted foe, toughest foe, favorite dungeon
 - **Journal**: a timeline of firsts and milestones (first rare, first epic, 1,000 kills, new zones, levels, …)
 
@@ -54,5 +55,6 @@ Then type `/kf` in game, or click the minimap button (or the addon compartment e
 - **"Gold together" is an estimate.** Group loot is split evenly, so the duo total is counted as twice your share.
 - **Creature types need a look at the creature.** A kill's type is read while it's your target, a nameplate or your mouseover. Anything never seen that way counts as "Unidentified".
 - **One partner at a time.** Several journeys (one per friend) are supported, but only one partner is tracked at once, and the start-a-journey prompt appears only in a two-person group. Use `/kf partner Name` in bigger groups.
+- **Records are best-effort on Forever.** Without a combat log, the game reports how much damage a creature took but not who dealt it. A hit is credited to you or your friend only when it's clearly theirs (they just cast a spell and have that creature targeted, and the other player doesn't fit the same description). Melee hits, pet damage and overlapping casts aren't counted, so a record is never credited to the wrong player, but some real hits are missed. `/kf debug` prints every hit it saw and why it was counted or skipped.
 - **Untested at scale.** Verified with a headless test suite and by the author in the Forever beta; boss detection, heavy combat performance and unusual group setups haven't been tested widely. Bug reports are welcome in the issue tracker.
 

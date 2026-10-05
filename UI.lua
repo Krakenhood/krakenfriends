@@ -23,7 +23,7 @@ local TABS = {
 }
 
 local LOG_ICONS = {
-    start = "start", zone = "zone", boss = "boss", rare = "rare", loot = "epic",
+    start = "start", zone = "zone", boss = "boss", rare = "rare", loot = "epic", record = "kills",
     milestone = "milestone", level = "level", dungeon = "dungeon",
 }
 
@@ -285,6 +285,28 @@ function factories.split(parent)
     return w
 end
 
+-- A record for both players side by side: name, big number, spell and target.
+function factories.record(parent)
+    local w = CreateFrame("Frame", nil, parent)
+    w:SetSize(ROW_W, 70)
+    local half = ROW_W / 2 - 12
+    w.title = Text(w, 10, Theme.dim, "CENTER")
+    w.title:SetPoint("TOP", 0, -2)
+    for _, side in ipairs({ "left", "right" }) do
+        local anchor, justify = side == "left" and "TOPLEFT" or "TOPRIGHT", side == "left" and "LEFT" or "RIGHT"
+        w[side] = {
+            name = Text(w, 11, Theme.text, justify),
+            amount = Text(w, 17, Theme.text, justify),
+            sub = Text(w, 10, Theme.dim, justify),
+        }
+        w[side].name:SetPoint(anchor, 0, -17)
+        w[side].amount:SetPoint(anchor, 0, -32)
+        w[side].sub:SetPoint(anchor, 0, -52)
+        for _, fs in pairs(w[side]) do fs:SetWidth(half) end
+    end
+    return w
+end
+
 function factories.note(parent)
     local w = CreateFrame("Frame", nil, parent)
     w:SetSize(ROW_W, 20)
@@ -499,6 +521,28 @@ function UI:Split(y, title, a, b, nameA, classA, nameB, classB)
     return self:Place(w, y, 2)
 end
 
+local CRIT_COLOR = { 1, 0.74, 0.2 }
+
+function UI:Record(y, title, a, b, nameA, classA, nameB, classB, multi, color)
+    local w = self:Acquire("record")
+    w.title:SetText(title)
+    local function fill(side, rec, name, class)
+        local label = KF.ClassText(name, class)
+        if rec and multi and rec.ch then label = label .. KF.Colorize("  " .. rec.ch, rgb(Theme.dim)) end
+        side.name:SetText(label)
+        if rec then
+            side.amount:SetText(KF.Colorize(FN(rec.n), rgb(color or Theme.text)))
+            side.sub:SetText((rec.s or "Melee") .. (rec.d and (" on " .. rec.d) or "") .. "  ·  " .. date("%d %b", rec.t))
+        else
+            side.amount:SetText(KF.Colorize("-", rgb(Theme.dim)))
+            side.sub:SetText("no record yet")
+        end
+    end
+    fill(w.left, a, nameA, classA)
+    fill(w.right, b, nameB, classB)
+    return self:Place(w, y, 2)
+end
+
 function UI:QualityBar(y, s)
     local w = self:Acquire("qbar")
     local total = sum(s.lootMe) + sum(s.lootPartner)
@@ -577,6 +621,7 @@ function UI:Lists(j)
     if self.scope and j.pairs[self.scope] then set = { [self.scope] = j.pairs[self.scope] } end
     local L = { mobs = {}, rares = {}, bosses = {}, dungeons = {}, runs = {}, zones = {}, items = {}, log = {} }
     L.multi = not self.scope and count(j.pairs) > 1
+    L.records = { me = {}, partner = {} }
 
     for key, p in pairs(set) do
         for id, e in pairs(p.mobs) do
@@ -616,6 +661,13 @@ function UI:Lists(j)
             it.by[key] = e.c
         end
         for i, e in ipairs(p.log) do L.log[#L.log + 1] = { e = e, pair = key, i = i } end
+        for _, who in ipairs({ "me", "partner" }) do
+            for _, kind in ipairs({ "hit", "crit" }) do
+                local r = p.records and p.records[who] and p.records[who][kind]
+                local best = L.records[who][kind]
+                if r and (not best or r.n > best.n) then L.records[who][kind] = r end
+            end
+        end
         local tough = p.toughest
         if tough and tough.n and (tough.lv or 0) > ((L.toughest and L.toughest.lv) or 0) then L.toughest = tough end
     end
@@ -724,6 +776,13 @@ function UI:BuildOverview(y, j, s, L)
     y = self:Split(y, "Killing blows", s.kbMe, s.kbPartner, nameA, classA, nameB, classB)
     y = self:Split(y, "Items looted", sum(s.lootMe), sum(s.lootPartner), nameA, classA, nameB, classB)
     y = self:Split(y, "Deaths", s.deathsMe, s.deathsPartner, nameA, classA, nameB, classB)
+
+    local rm, rp = L.records.me, L.records.partner
+    if rm.hit or rm.crit or rp.hit or rp.crit then
+        y = self:Section(y, "Records")
+        y = self:Record(y, "Biggest crit", rm.crit, rp.crit, nameA, classA, nameB, classB, L.multi, CRIT_COLOR)
+        y = self:Record(y, "Biggest hit", rm.hit, rp.hit, nameA, classA, nameB, classB, L.multi)
+    end
 
     y = self:Section(y, "Trivia")
     y = self:Line(y, "Time together", KF.FormatDuration(s.time))

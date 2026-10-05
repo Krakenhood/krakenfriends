@@ -174,7 +174,15 @@ UNITS = {}
 GROUP = { n = 1, raid = false }
 INSTANCE = { name = "Elwynn Forest", type = "none", id = 0 }
 ZONE = "Elwynn Forest"
-local function U(unit) return unit and UNITS[unit] end
+local function U(unit)
+    if not unit then return nil end
+    local u = UNITS[unit]
+    if u then return u end
+    -- "<unit>target" resolves through the unit's .target token
+    local base = unit:match("^(.-)target$")
+    local b = base and base ~= "" and UNITS[base]
+    return b and b.target and UNITS[b.target] or nil
+end
 
 function UnitExists(u) return U(u) ~= nil end
 function UnitGUID(u) local x = U(u); return x and x.guid end
@@ -217,6 +225,7 @@ C_Item = {
     GetItemIconByID = function(id) return 12345 end,
 }
 C_Texture = { GetAtlasInfo = function(a) if a:find("^classicon") then return nil end return { width = 1 } end }
+C_Spell = { GetSpellName = function(id) return ({ [133] = "Fireball", [585] = "Smite" })[id] end }
 C_AddOns = { GetAddOnMetadata = function() return "1.0.0-test" end }
 function GetInstanceInfo() return INSTANCE.name, INSTANCE.type, 0, "", 5, 0, false, INSTANCE.id, 0, nil, false end
 function GetRealZoneText() return ZONE end
@@ -227,4 +236,4 @@ for e in ([[ADDON_LOADED PLAYER_LOGIN PLAYER_LOGOUT PLAYER_ENTERING_WORLD GROUP_
 BN_FRIEND_INFO_CHANGED PARTY_KILL UNIT_DIED PLAYER_TARGET_DIED PLAYER_TARGET_CHANGED UPDATE_MOUSEOVER_UNIT
 NAME_PLATE_UNIT_ADDED UNIT_THREAT_LIST_UPDATE UNIT_TARGET PLAYER_REGEN_DISABLED PLAYER_REGEN_ENABLED CHAT_MSG_LOOT
 CHAT_MSG_MONEY CHAT_MSG_SYSTEM ENCOUNTER_START ENCOUNTER_END BOSS_KILL PLAYER_DEAD UNIT_HEALTH PLAYER_LEVEL_UP
-UNIT_LEVEL QUEST_TURNED_IN ZONE_CHANGED_NEW_AREA]]):gmatch("%S+") do KNOWN_EVENTS[e] = true end
+UNIT_LEVEL QUEST_TURNED_IN ZONE_CHANGED_NEW_AREA UNIT_SPELLCAST_SUCCEEDED UNIT_COMBAT]]):gmatch("%S+") do KNOWN_EVENTS[e] = true end

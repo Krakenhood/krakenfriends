@@ -232,6 +232,72 @@ function T:OnTargetDied()
 end
 
 --------------------------------------------------------------------------------
+-- Records: biggest hit and crit per player
+--
+-- There is no combat log here, and UNIT_COMBAT reports the damage a unit took
+-- (amount and a CRITICAL flag) without saying who dealt it. So a hit counts
+-- for you or your partner only when it is clearly theirs: they cast a spell
+-- in the last moment AND have that creature targeted, and the other player
+-- doesn't fit the same description. Anything ambiguous is skipped, so a
+-- record is never credited to the wrong player, but melee hits, pets and
+-- overlapping casts go uncounted.
+--------------------------------------------------------------------------------
+
+local CAST_WINDOW = 1.5
+local casts = {}    -- who -> { t, spell }
+local seenHits = {} -- "guid:amount" -> time, to drop the copy each unit token delivers
+
+function T:OnCast(unit, _, spellID)
+    unit, spellID = clean(unit), clean(spellID)
+    if type(unit) ~= "string" or type(spellID) ~= "number" then return end
+    local p = KF.partner
+    local who = (unit == "player" and "me") or (p and unit == p.unit and "partner")
+    if not who then return end
+    local name = C_Spell and call(C_Spell.GetSpellName, spellID)
+    casts[who] = { t = GetTime(), spell = type(name) == "string" and name or nil }
+end
+
+-- is `unit` the creature that `who` currently has targeted?
+local function targeting(who, unit)
+    if who == "me" then return call(UnitIsUnit, unit, "target") end
+    local p = KF.partner
+    return p and call(UnitIsUnit, unit, p.unit .. "target")
+end
+
+function T:OnUnitCombat(unit, event, flagText, amount)
+    if not (KF.partner and KF.together) then return end
+    unit, event, flagText, amount = clean(unit), clean(event), clean(flagText), clean(amount)
+    if type(unit) ~= "string" or event ~= "WOUND" or type(amount) ~= "number" or amount <= 0 then return end
+    if not call(UnitCanAttack, "player", unit) then return end -- only damage dealt to enemies
+
+    local now = GetTime()
+    local key = (call(UnitGUID, unit) or unit) .. ":" .. amount
+    if seenHits[key] and now - seenHits[key] < 0.1 then return end
+    seenHits[key] = now
+
+    local candidates = {}
+    for _, who in ipairs({ "me", "partner" }) do
+        local cast = casts[who]
+        if cast and now - cast.t <= CAST_WINDOW and targeting(who, unit) then candidates[#candidates + 1] = who end
+    end
+    if #candidates ~= 1 then
+        KF:Debug("hit %s on %s [%s]: %s", amount, call(UnitName, unit) or unit, flagText or "", #candidates == 0 and "no matching cast, skipped" or "ambiguous, skipped")
+        return
+    end
+    local who = candidates[1]
+    local crit = flagText == "CRITICAL"
+    KF:Debug("hit %s%s on %s: %s (%s)", amount, crit and " CRIT" or "", call(UnitName, unit) or unit, who, casts[who].spell or "?")
+    KF:SubmitHit(who, amount, crit, casts[who].spell, call(UnitName, unit))
+end
+
+function T:PruneHits()
+    local cutoff = GetTime() - 5
+    for key, t in pairs(seenHits) do
+        if t < cutoff then seenHits[key] = nil end
+    end
+end
+
+--------------------------------------------------------------------------------
 -- Loot and gold, parsed with the client's own (localized) chat strings
 --------------------------------------------------------------------------------
 
@@ -546,6 +612,7 @@ local function heartbeat()
     if ticks % 5 == 0 then
         T:CheckInstance()
         T:Prune()
+        T:PruneHits()
         KF:CheckMilestones()
     end
     KF:Fire("TICK")
@@ -586,6 +653,8 @@ end
 KF:On("PARTY_KILL", whenReady(function(a, t) T:OnPartyKill(a, t) end))
 KF:On("UNIT_DIED", whenReady(function(guid) T:OnUnitDied(guid) end))
 KF:On("PLAYER_TARGET_DIED", whenReady(function() T:OnTargetDied() end))
+KF:On("UNIT_SPELLCAST_SUCCEEDED", whenReady(function(unit, castGUID, spellID) T:OnCast(unit, castGUID, spellID) end))
+KF:On("UNIT_COMBAT", whenReady(function(unit, event, flagText, amount) T:OnUnitCombat(unit, event, flagText, amount) end))
 
 KF:On("PLAYER_TARGET_CHANGED", whenReady(function() scanWithPartner("target") end))
 KF:On("UPDATE_MOUSEOVER_UNIT", whenReady(function() scanWithPartner("mouseover") end))

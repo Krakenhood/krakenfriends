@@ -266,6 +266,86 @@ check(text:find("Thalianne") ~= nil, "scoped header shows the chapter's characte
 print("  [journal, main chapter] " .. text:sub(1, 300))
 UI.scope = nil
 
+section("records (hit and crit)")
+local pairNow = KF:CurrentPair()
+UNITS.target = { guid = "Creature-0-1-0-1-3000-00000300", name = "Training Dummy", hostile = true, ctype = 7, level = 10 }
+UNITS.nameplate5 = { guid = "Creature-0-1-0-1-3001-00000301", name = "Other Dummy", hostile = true, ctype = 7, level = 10 }
+UNITS.party1.target = "nameplate5"
+local function hit(unit, flag, amount) FireEvent("UNIT_COMBAT", unit, "WOUND", flag, amount, 4) end
+-- my cast, my target -> mine
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-1", 133)
+hit("target", "CRITICAL", 1500)
+check(pairNow.records.me.crit and pairNow.records.me.crit.n == 1500 and pairNow.records.me.crit.s == "Fireball", "my crit recorded with its spell")
+check(pairNow.records.me.hit and pairNow.records.me.hit.n == 1500, "a crit is also the biggest hit")
+-- the same hit delivered again on another token (nameplate of the same guid) must not break anything
+UNITS.nameplate6 = UNITS.target
+hit("nameplate6", "CRITICAL", 1500)
+-- a smaller normal hit changes nothing
+Advance(2)
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-2", 133)
+hit("target", "", 900)
+check(pairNow.records.me.hit.n == 1500 and pairNow.records.me.crit.n == 1500, "smaller hit leaves records alone")
+-- partner cast on the mob THEY target -> partner's record
+Advance(2)
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "party1", "cast-3", 585)
+hit("nameplate5", "CRITICAL", 700)
+check(pairNow.records.partner.crit and pairNow.records.partner.crit.n == 700 and pairNow.records.partner.crit.s == "Smite", "partner crit credited to the partner")
+check(pairNow.records.me.crit.n == 1500, "...and not to me")
+-- both cast, both target the same mob -> ambiguous, skipped
+Advance(2)
+UNITS.party1.target = "target"
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-4", 133)
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "party1", "cast-5", 585)
+hit("target", "CRITICAL", 9999)
+check(pairNow.records.me.crit.n == 1500 and pairNow.records.partner.crit.n == 700, "ambiguous hit is not credited to anyone")
+-- stale cast -> skipped
+Advance(5)
+hit("target", "CRITICAL", 8888)
+check(pairNow.records.me.crit.n == 1500, "hit without a recent cast is skipped")
+-- damage to friendly targets is ignored
+UNITS.party1.hostile = false
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-6", 133)
+hit("party1", "CRITICAL", 7777)
+check(pairNow.records.me.crit.n == 1500, "damage taken by friends is ignored")
+-- secret amounts are ignored
+UNITS.party1.target = "nameplate5"
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-7", 133)
+FireEvent("UNIT_COMBAT", "target", "WOUND", "CRITICAL", SECRET, 4)
+check(pairNow.records.me.crit.n == 1500, "secret amount ignored without errors")
+-- a bigger crit later gets announced once
+Advance(61)
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-8", 133)
+hit("target", "CRITICAL", 3000)
+local announced = 0
+for _, e in ipairs(pairNow.log) do if e.k == "record" and e.x:find("crit for 3,000") then announced = announced + 1 end end
+check(pairNow.records.me.crit.n == 3000 and announced == 1, "new crit record announced in the journal")
+Advance(2)
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-9", 133)
+hit("target", "CRITICAL", 3600)
+local later = 0
+for _, e in ipairs(pairNow.log) do if e.k == "record" then later = later + 1 end end
+check(pairNow.records.me.crit.n == 3600 and later == 1, "announcements are rate limited")
+-- not together -> nothing counts
+UNITS.party1.visible = false
+C_Map.GetBestMapForUnit = function(u) return u == "player" and 1429 or 1436 end
+TickAll()
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-10", 133)
+hit("target", "CRITICAL", 50000)
+check(pairNow.records.me.crit.n == 3600, "no records while apart")
+UNITS.party1.visible = true
+C_Map.GetBestMapForUnit = function() return 1429 end
+TickAll()
+UNITS.party1.hostile = nil
+
+-- the Overview shows them, merged across chapters
+UI.scope = nil
+CAPTURE = {}
+UI:SelectTab("Overview")
+local ovText = table.concat(CAPTURE, " | ")
+CAPTURE = nil
+check(ovText:find("RECORDS") and ovText:find("Biggest crit") and ovText:find("3,600"), "Records block on the Overview")
+print("  [records] " .. ovText:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):match("RECORDS.-TRIVIA") or "?")
+
 section("save + restore (beta safety net)")
 FireEvent("PLAYER_LOGOUT")
 check(KrakenfriendsDB.savedAt == NOW and KrakenfriendsCharDB == KrakenfriendsDB, "saved to both globals")

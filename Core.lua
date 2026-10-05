@@ -198,6 +198,7 @@ local JOURNEY_TEMPLATE = {
 local PAIR_TEMPLATE = {
     stats = KF.NewStats(),
     mobs = {}, rares = {}, bosses = {}, dungeons = {}, runs = {}, zones = {}, items = {}, log = {},
+    records = { me = {}, partner = {} }, -- biggest hit and crit per player: { n = amount, s = spell, d = target, t = time, ch = character }
 }
 
 local function upgradeJourney(j)
@@ -263,6 +264,39 @@ function KF:First(kind, key)
     if not j or j.firsts[id] then return false end
     j.firsts[id] = time()
     return true
+end
+
+-- Records: the biggest hit and the biggest crit for each player, kept per
+-- character pair. `who` is "me" or "partner".
+local lastRecordToast = {}
+
+function KF:SubmitHit(who, amount, crit, spell, target)
+    local pair = self:CurrentPair()
+    if not pair or type(amount) ~= "number" or amount <= 0 then return end
+    local recs = pair.records
+    recs[who] = recs[who] or {}
+    local p = self.partner
+    local char = who == "me" and self.me.name or (p and p.name) or "?"
+    local changed
+
+    for _, kind in ipairs(crit and { "hit", "crit" } or { "hit" }) do
+        local old = recs[who][kind]
+        if not old or amount > old.n then
+            recs[who][kind] = { n = amount, s = spell, d = target, t = time(), ch = char }
+            changed = true
+            -- announce clear improvements of a crit record, at most once a minute per player
+            if kind == "crit" and old and old.n >= 20 and amount >= old.n * 1.2 then
+                local now = GetTime()
+                if now - (lastRecordToast[who] or -60) >= 60 then
+                    lastRecordToast[who] = now
+                    local text = ("%s crit for %s%s"):format(who == "me" and "You" or char, KF.FormatNumber(amount), spell and (" with " .. spell) or "")
+                    self:Log("record", text)
+                    self:Toast("New crit record!", text, "kills")
+                end
+            end
+        end
+    end
+    if changed then self:Fire("UPDATE") end
 end
 
 function KF:Toast(title, text, icon)
@@ -380,6 +414,12 @@ function KF:ToggleDemo()
     main.dungeons = { [36] = { n = "The Deadmines", runs = 3, time = 7400, bosses = 17, last = now - day * 4 }, [43] = { n = "Wailing Caverns", runs = 2, time = 6800, bosses = 10, last = now - day * 2 } }
     main.runs = { { n = "Wailing Caverns", start = now - day * 2, dur = 3500, kills = 96, bosses = 6, deaths = 1 }, { n = "The Deadmines", start = now - day * 4, dur = 2380, kills = 84, bosses = 6, deaths = 0 } }
     main.zones = { ["Elwynn Forest"] = j.started, ["Westfall"] = now - day * 8, ["Duskwood"] = now - day * 3 }
+    main.records = {
+        me = { hit = { n = 1432, s = "Fireball", d = "Edwin VanCleef", t = now - day * 4, ch = self.me.name },
+               crit = { n = 2871, s = "Fireball", d = "Edwin VanCleef", t = now - day * 4, ch = self.me.name } },
+        partner = { hit = { n = 986, s = "Smite", d = "Mor'Ladim", t = now - day * 3, ch = "Thalianne" },
+                    crit = { n = 1934, s = "Smite", d = "Mor'Ladim", t = now - day * 3, ch = "Thalianne" } },
+    }
     main.items = {
         [2244] = { n = "Krol Blade", q = 4, c = 1, me = 1, t = now - day * 2, l = now - day * 2 },
         [5191] = { n = "Cruel Barb", q = 3, c = 1, pa = 1, t = now - day * 4, l = now - day * 4 },
@@ -406,6 +446,12 @@ function KF:ToggleDemo()
     a.deathsMe, a.quests, a.time, a.levelsMe = 1, 31, 3600 * 3 + 900, 8
     second.mobs = { [299] = { n = "Young Wolf", c = 40, ty = "beast", lv = 3 }, [80] = { n = "Kobold Laborer", c = 31, ty = "humanoid", lv = 4 } }
     second.zones = { ["Elwynn Forest"] = second.started }
+    second.records = {
+        me = { hit = { n = 61, s = "Heroic Strike", d = "Young Wolf", t = now - day, ch = "Krakenalt" },
+               crit = { n = 122, s = "Heroic Strike", d = "Kobold Laborer", t = now - day, ch = "Krakenalt" } },
+        partner = { hit = { n = 48, s = "Smite", d = "Young Wolf", t = now - day, ch = "Thalianne" },
+                    crit = { n = 96, s = "Smite", d = "Defias Thug", t = now - day, ch = "Thalianne" } },
+    }
     second.items = { [15210] = { n = "Raider Shortsword", q = 2, c = 1, me = 1, t = now - day, l = now - day } }
     second.log = {
         { t = second.started + 1800, k = "level", x = "Krakenalt reached level 5" },
