@@ -288,6 +288,7 @@ end
 function KF:PrintStatus()
     local p, j = self.partner, self.journey
     self:Printf("v%s, data source: %s", self.version, self.dbSource or "?")
+    self:Printf("addon messages to your friend: %s", self.messagingWorks and "work (tested with /kf ping)" or "untested (try /kf ping)")
     if p then
         self:Printf("partner: %s (%s), %s", KF.ClassText(p.name, p.class), p.unit,
             self.together and "|cff5cdb78together: tracking|r" or "|cff8a8f98apart: paused|r")

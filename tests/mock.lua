@@ -225,7 +225,19 @@ C_Item = {
     GetItemIconByID = function(id) return 12345 end,
 }
 C_Texture = { GetAtlasInfo = function(a) if a:find("^classicon") then return nil end return { width = 1 } end }
-C_Spell = { GetSpellName = function(id) return ({ [133] = "Fireball", [585] = "Smite" })[id] end }
+SENT = {}
+Enum = { SendAddonMessageResult = { Success = 0, AddonMessageThrottle = 3, GeneralError = 9 } }
+C_ChatInfo = {
+    RegisterAddonMessagePrefix = function(p) PREFIXES = PREFIXES or {}; PREFIXES[p] = true; return 0 end,
+    SendAddonMessage = function(prefix, text, chan) SENT[#SENT + 1] = { prefix = prefix, text = text, chan = chan }; return 0 end,
+    AreOutgoingAddonChatMessagesRestricted = function() return true end,
+}
+C_Spell = {
+    GetSpellName = function(id) return ({ [133] = "Fireball", [585] = "Smite", [2136] = "Fire Blast" })[id] end,
+    GetSpellDescription = function(id) return ({ [133] = "Hurls a fiery ball that deals 50 Fire damage.", [585] = "Smites an enemy for 40 Holy damage.", [2136] = "Blasts the enemy for 30 Fire damage." })[id] end,
+}
+SPELL_SCHOOL0_NAME, SPELL_SCHOOL1_NAME, SPELL_SCHOOL2_NAME, SPELL_SCHOOL3_NAME = "Physical", "Holy", "Fire", "Nature"
+SPELL_SCHOOL4_NAME, SPELL_SCHOOL5_NAME, SPELL_SCHOOL6_NAME = "Frost", "Shadow", "Arcane"
 C_AddOns = { GetAddOnMetadata = function() return "1.0.0-test" end }
 function GetInstanceInfo() return INSTANCE.name, INSTANCE.type, 0, "", 5, 0, false, INSTANCE.id, 0, nil, false end
 function GetRealZoneText() return ZONE end
@@ -236,4 +248,4 @@ for e in ([[ADDON_LOADED PLAYER_LOGIN PLAYER_LOGOUT PLAYER_ENTERING_WORLD GROUP_
 BN_FRIEND_INFO_CHANGED PARTY_KILL UNIT_DIED PLAYER_TARGET_DIED PLAYER_TARGET_CHANGED UPDATE_MOUSEOVER_UNIT
 NAME_PLATE_UNIT_ADDED UNIT_THREAT_LIST_UPDATE UNIT_TARGET PLAYER_REGEN_DISABLED PLAYER_REGEN_ENABLED CHAT_MSG_LOOT
 CHAT_MSG_MONEY CHAT_MSG_SYSTEM ENCOUNTER_START ENCOUNTER_END BOSS_KILL PLAYER_DEAD UNIT_HEALTH PLAYER_LEVEL_UP
-UNIT_LEVEL QUEST_TURNED_IN ZONE_CHANGED_NEW_AREA UNIT_SPELLCAST_SUCCEEDED UNIT_COMBAT]]):gmatch("%S+") do KNOWN_EVENTS[e] = true end
+UNIT_LEVEL QUEST_TURNED_IN ZONE_CHANGED_NEW_AREA UNIT_SPELLCAST_SUCCEEDED UNIT_COMBAT CHAT_MSG_ADDON]]):gmatch("%S+") do KNOWN_EVENTS[e] = true end

@@ -198,7 +198,7 @@ local JOURNEY_TEMPLATE = {
 local PAIR_TEMPLATE = {
     stats = KF.NewStats(),
     mobs = {}, rares = {}, bosses = {}, dungeons = {}, runs = {}, zones = {}, items = {}, log = {},
-    records = { me = {}, partner = {} }, -- biggest hit and crit per player: { n = amount, s = spell, d = target, t = time, ch = character }
+    records = { me = {}, partner = {}, duo = {} }, -- biggest hit and crit per player, and for both of you together: { n = amount, s = spell or school, d = target, t = time, ch = character }
 }
 
 local function upgradeJourney(j)
@@ -276,7 +276,7 @@ function KF:SubmitHit(who, amount, crit, spell, target)
     local recs = pair.records
     recs[who] = recs[who] or {}
     local p = self.partner
-    local char = who == "me" and self.me.name or (p and p.name) or "?"
+    local char = (who == "me" and self.me.name) or (who == "partner" and p and p.name) or nil -- "duo" belongs to nobody in particular
     local changed
 
     for _, kind in ipairs(crit and { "hit", "crit" } or { "hit" }) do
@@ -289,7 +289,7 @@ function KF:SubmitHit(who, amount, crit, spell, target)
                 local now = GetTime()
                 if now - (lastRecordToast[who] or -60) >= 60 then
                     lastRecordToast[who] = now
-                    local text = ("%s crit for %s%s"):format(who == "me" and "You" or char, KF.FormatNumber(amount), spell and (" with " .. spell) or "")
+                    local text = ("%s crit for %s%s"):format(who == "me" and "You" or who == "duo" and "You two" or char or "?", KF.FormatNumber(amount), spell and (" (" .. spell .. ")") or "")
                     self:Log("record", text)
                     self:Toast("New crit record!", text, "kills")
                 end
@@ -333,7 +333,7 @@ end
 --------------------------------------------------------------------------------
 
 local DEFAULTS = {
-    settings = { debug = false, toasts = true, minimap = { angle = 205, hide = false }, window = {} },
+    settings = { debug = false, toasts = true, guessRecords = false, minimap = { angle = 205, hide = false }, window = {} },
     journeys = {},
     ignored = {},
 }
@@ -419,6 +419,10 @@ function KF:ToggleDemo()
                crit = { n = 2871, s = "Fireball", d = "Edwin VanCleef", t = now - day * 4, ch = self.me.name } },
         partner = { hit = { n = 986, s = "Smite", d = "Mor'Ladim", t = now - day * 3, ch = "Thalianne" },
                     crit = { n = 1934, s = "Smite", d = "Mor'Ladim", t = now - day * 3, ch = "Thalianne" } },
+    }
+    main.records.duo = {
+        hit = { n = 2871, s = "Fire", d = "Edwin VanCleef", t = now - day * 4 },
+        crit = { n = 2871, s = "Fire", d = "Edwin VanCleef", t = now - day * 4 },
     }
     main.items = {
         [2244] = { n = "Krol Blade", q = 4, c = 1, me = 1, t = now - day * 2, l = now - day * 2 },
@@ -506,6 +510,8 @@ local HELP = {
     "|cff4fd1c5/kf minimap|r: show or hide the minimap button",
     "|cff4fd1c5/kf toasts|r: turn milestone pop-ups on or off",
     "|cff4fd1c5/kf reset|r: reset the journey shown in the window",
+    "|cff4fd1c5/kf records|r: experimental hit and crit records on or off (|cff4fd1c5/kf records reset|r clears them)",
+    "|cff4fd1c5/kf ping|r: test whether the addon can message your friend's copy (both need this version)",
     "|cff4fd1c5/kf debug|r: print tracking details to chat",
 }
 
@@ -528,6 +534,21 @@ function KF:Slash(input)
     elseif cmd == "toasts" then
         settings.toasts = not settings.toasts
         self:Print("Milestone pop-ups " .. (settings.toasts and "on." or "off."))
+    elseif cmd == "ping" then
+        self:Ping()
+    elseif cmd == "records" then
+        if rest:lower() == "reset" then
+            local j = self.UI:ViewedJourney()
+            if not j then return self:Print("No journey to clear.") end
+            for _, pair in pairs(j.pairs) do pair.records = { me = {}, partner = {}, duo = {} } end
+            self:Fire("UPDATE")
+            self:Print("Hit and crit records cleared for this journey.")
+        else
+            settings.guessRecords = not settings.guessRecords
+            self:Fire("UPDATE") -- redraw an open window right away
+            self:Print("Experimental hit and crit records " .. (settings.guessRecords and "on." or "off.")
+                .. (settings.guessRecords and " The game doesn't say who dealt a hit, so with two players attacking the same creature a hit can be credited to the wrong player." or ""))
+        end
     elseif cmd == "debug" then
         settings.debug = not settings.debug
         self:Print("Debug output " .. (settings.debug and "on." or "off."))
@@ -539,6 +560,79 @@ function KF:Slash(input)
         for _, line in ipairs(HELP) do DEFAULT_CHAT_FRAME:AddMessage("   " .. line) end
     end
 end
+
+--------------------------------------------------------------------------------
+-- Messaging test (/kf ping)
+--
+-- Forever reports outgoing addon messages as restricted, but nobody has
+-- measured whether they are really blocked. /kf ping sends one message to your
+-- group and prints what the game answers; a copy of Krakenfriends on the other
+-- side replies, so two players can find out whether syncing is possible.
+--------------------------------------------------------------------------------
+
+local MSG_PREFIX = "KRAKENFR"
+local pendingPing
+
+local function enumName(enum, value)
+    if type(enum) == "table" then
+        for name, v in pairs(enum) do
+            if v == value then return name end
+        end
+    end
+    return tostring(value)
+end
+
+local function groupChannel()
+    if IsInRaid() then return "RAID" end
+    if IsInGroup() then return "PARTY" end
+end
+
+function KF:Ping()
+    if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then
+        return self:Print("This client has no addon messaging.")
+    end
+    local channel = groupChannel()
+    if not channel then
+        return self:Print("Group up with your friend first, then type /kf ping.")
+    end
+    local restricted = KF.call(C_ChatInfo.AreOutgoingAddonChatMessagesRestricted)
+    local ok, result = pcall(C_ChatInfo.SendAddonMessage, MSG_PREFIX, "ping|" .. self.version, channel)
+    result = clean(result)
+    self:Printf("ping sent to %s. The game says: restricted = %s, result = %s.", channel, tostring(restricted),
+        ok and enumName(Enum and Enum.SendAddonMessageResult, result) or ("error: " .. tostring(result)))
+
+    local token = {}
+    pendingPing = token
+    C_Timer.After(6, function()
+        if pendingPing == token then
+            pendingPing = nil
+            self:Print("No reply yet. Either the game blocks addon messages, your friend's copy is older than this version, or they aren't in your group.")
+        end
+    end)
+end
+
+KF:On("CHAT_MSG_ADDON", function(prefix, text, channel, sender)
+    prefix, text, channel, sender = clean(prefix), clean(text), clean(channel), clean(sender)
+    if prefix ~= MSG_PREFIX or type(text) ~= "string" or type(sender) ~= "string" or not KF.me then return end
+    if sender:match("^([^%-]+)") == KF.me.name then return end -- our own message echoed back
+    local kind, version = strsplit("|", text)
+    if kind == "ping" then
+        KF:Printf("%s pinged you (Krakenfriends %s). Replying...", sender, version or "?")
+        if C_ChatInfo and C_ChatInfo.SendAddonMessage and type(channel) == "string" then
+            pcall(C_ChatInfo.SendAddonMessage, MSG_PREFIX, "pong|" .. KF.version, channel)
+        end
+    elseif kind == "pong" then
+        pendingPing = nil
+        KF.messagingWorks = true
+        KF:Printf("|cff5cdb78%s answered (Krakenfriends %s): addon messages work between you two!|r", sender, version or "?")
+    end
+end)
+
+KF:Listen("LOGIN", function()
+    if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
+        pcall(C_ChatInfo.RegisterAddonMessagePrefix, MSG_PREFIX)
+    end
+end)
 
 SLASH_KRAKENFRIENDS1 = "/kf"
 SLASH_KRAKENFRIENDS2 = "/krakenfriends"

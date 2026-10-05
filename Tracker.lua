@@ -235,26 +235,79 @@ end
 -- Records: biggest hit and crit per player
 --
 -- There is no combat log here, and UNIT_COMBAT reports the damage a unit took
--- (amount and a CRITICAL flag) without saying who dealt it. So a hit counts
--- for you or your partner only when it is clearly theirs: they cast a spell
--- in the last moment AND have that creature targeted, and the other player
--- doesn't fit the same description. Anything ambiguous is skipped, so a
--- record is never credited to the wrong player, but melee hits, pets and
--- overlapping casts go uncounted.
+-- (the amount, a CRITICAL flag and the damage school) without saying who dealt
+-- it. Two kinds of record come out of that:
+--
+--  * "together": the biggest hit and crit on any creature one of you is
+--    fighting, credited to the duo, and only while the group is exactly the
+--    two of you. Pets, strangers helping out and damage-over-time ticks on that
+--    creature can still be in it.
+--  * "you" and "friend": a best guess of who dealt a hit, from "cast a spell a
+--    moment ago, with that creature targeted, in a school that fits".
+--    EXPERIMENTAL and off by default (/kf records): this client can't see the
+--    friend's casts, and two players of the same school hitting at the same
+--    moment can't be told apart, so a hit can be credited to the wrong player.
 --------------------------------------------------------------------------------
 
+KF.recordsAreGuesses = true -- the UI says so on the Records block
+
 local CAST_WINDOW = 1.5
-local casts = {}    -- who -> { t, spell }
+local casts = {}    -- who -> { t, spell, school }
 local seenHits = {} -- "guid:amount" -> time, to drop the copy each unit token delivers
 
+local SCHOOLS = 7 -- physical, holy, fire, nature, frost, shadow, arcane (masks 1, 2, 4, ... 64)
+
+local function schoolName(mask)
+    if type(mask) ~= "number" then return nil end
+    local names = {}
+    for i = 0, SCHOOLS - 1 do
+        local v = 2 ^ i
+        if mask % (2 * v) >= v then names[#names + 1] = _G["SPELL_SCHOOL" .. i .. "_NAME"] or tostring(v) end
+    end
+    return #names > 0 and table.concat(names, "/") or nil
+end
+
+local function sharesSchool(a, b)
+    for i = 0, SCHOOLS - 1 do
+        local v = 2 ^ i
+        if a % (2 * v) >= v and b % (2 * v) >= v then return true end
+    end
+    return false
+end
+
+-- The game doesn't list a spell's school, but its description names it
+-- ("... Fire damage"). A spell that names none is left unmatched, not rejected.
+local spellSchools = {} -- spellID -> mask, or false
+
+local function spellSchool(spellID)
+    local cached = spellSchools[spellID]
+    if cached ~= nil then return cached or nil end
+    local describe = (C_Spell and C_Spell.GetSpellDescription) or GetSpellDescription
+    local text = describe and call(describe, spellID)
+    local mask
+    if type(text) == "string" then
+        text = text:lower()
+        for i = 0, SCHOOLS - 1 do
+            local name = _G["SPELL_SCHOOL" .. i .. "_NAME"]
+            if name and text:find(name:lower(), 1, true) then mask = (mask or 0) + 2 ^ i end
+        end
+    end
+    spellSchools[spellID] = mask or false
+    return mask
+end
+
 function T:OnCast(unit, _, spellID)
+    local hidden = issecretvalue and issecretvalue(spellID)
     unit, spellID = clean(unit), clean(spellID)
-    if type(unit) ~= "string" or type(spellID) ~= "number" then return end
+    if type(unit) ~= "string" then return end
     local p = KF.partner
     local who = (unit == "player" and "me") or (p and unit == p.unit and "partner")
     if not who then return end
+    -- with /kf debug on, show whether your friend's casts are visible to this client
+    if who == "partner" then KF:Debug("probe: friend's cast %s", hidden and "arrived with a HIDDEN spell id" or "visible") end
+    if type(spellID) ~= "number" then return end
     local name = C_Spell and call(C_Spell.GetSpellName, spellID)
-    casts[who] = { t = GetTime(), spell = type(name) == "string" and name or nil }
+    casts[who] = { t = GetTime(), spell = type(name) == "string" and name or nil, school = spellSchool(spellID) }
 end
 
 -- is `unit` the creature that `who` currently has targeted?
@@ -264,9 +317,9 @@ local function targeting(who, unit)
     return p and call(UnitIsUnit, unit, p.unit .. "target")
 end
 
-function T:OnUnitCombat(unit, event, flagText, amount)
+function T:OnUnitCombat(unit, event, flagText, amount, school)
     if not (KF.partner and KF.together) then return end
-    unit, event, flagText, amount = clean(unit), clean(event), clean(flagText), clean(amount)
+    unit, event, flagText, amount, school = clean(unit), clean(event), clean(flagText), clean(amount), clean(school)
     if type(unit) ~= "string" or event ~= "WOUND" or type(amount) ~= "number" or amount <= 0 then return end
     if not call(UnitCanAttack, "player", unit) then return end -- only damage dealt to enemies
 
@@ -275,19 +328,35 @@ function T:OnUnitCombat(unit, event, flagText, amount)
     if seenHits[key] and now - seenHits[key] < 0.1 then return end
     seenHits[key] = now
 
+    local crit = flagText == "CRITICAL"
+    local target = call(UnitName, unit)
+
+    -- together: any hit on a creature one of you is fighting. The game says nothing
+    -- about who dealt a hit, so this only counts while it is just the two of you in the
+    -- group; in a 5-man the other players would be in it too.
+    local info = self:ScanUnit(unit)
+    if info and info.engaged and not IsInRaid() and GetNumGroupMembers() == 2 then
+        KF:Debug("hit %s%s (school %s) on %s: counted for together", amount, crit and " CRIT" or "", school or "?", target or unit)
+        KF:SubmitHit("duo", amount, crit, schoolName(school), target)
+    end
+
+    -- you / friend: only when switched on, and only when exactly one player fits
+    if not KF.db.settings.guessRecords then return end
     local candidates = {}
     for _, who in ipairs({ "me", "partner" }) do
         local cast = casts[who]
-        if cast and now - cast.t <= CAST_WINDOW and targeting(who, unit) then candidates[#candidates + 1] = who end
+        if cast and now - cast.t <= CAST_WINDOW and targeting(who, unit)
+            and (not (cast.school and school) or sharesSchool(cast.school, school)) then
+            candidates[#candidates + 1] = who
+        end
     end
     if #candidates ~= 1 then
-        KF:Debug("hit %s on %s [%s]: %s", amount, call(UnitName, unit) or unit, flagText or "", #candidates == 0 and "no matching cast, skipped" or "ambiguous, skipped")
+        KF:Debug("hit %s on %s [%s, school %s]: %s", amount, target or unit, flagText or "", school or "?", #candidates == 0 and "no matching cast, skipped" or "ambiguous, skipped")
         return
     end
     local who = candidates[1]
-    local crit = flagText == "CRITICAL"
-    KF:Debug("hit %s%s on %s: %s (%s)", amount, crit and " CRIT" or "", call(UnitName, unit) or unit, who, casts[who].spell or "?")
-    KF:SubmitHit(who, amount, crit, casts[who].spell, call(UnitName, unit))
+    KF:Debug("hit %s%s (school %s) on %s: %s (%s)", amount, crit and " CRIT" or "", school or "?", target or unit, who, casts[who].spell or "?")
+    KF:SubmitHit(who, amount, crit, casts[who].spell, target)
 end
 
 function T:PruneHits()
@@ -654,7 +723,7 @@ KF:On("PARTY_KILL", whenReady(function(a, t) T:OnPartyKill(a, t) end))
 KF:On("UNIT_DIED", whenReady(function(guid) T:OnUnitDied(guid) end))
 KF:On("PLAYER_TARGET_DIED", whenReady(function() T:OnTargetDied() end))
 KF:On("UNIT_SPELLCAST_SUCCEEDED", whenReady(function(unit, castGUID, spellID) T:OnCast(unit, castGUID, spellID) end))
-KF:On("UNIT_COMBAT", whenReady(function(unit, event, flagText, amount) T:OnUnitCombat(unit, event, flagText, amount) end))
+KF:On("UNIT_COMBAT", whenReady(function(unit, event, flagText, amount, school) T:OnUnitCombat(unit, event, flagText, amount, school) end))
 
 KF:On("PLAYER_TARGET_CHANGED", whenReady(function() scanWithPartner("target") end))
 KF:On("UPDATE_MOUSEOVER_UNIT", whenReady(function() scanWithPartner("mouseover") end))

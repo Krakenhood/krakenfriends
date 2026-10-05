@@ -285,25 +285,25 @@ function factories.split(parent)
     return w
 end
 
--- A record for both players side by side: name, big number, spell and target.
+-- A record: you on the left, both of you together in the middle, your friend
+-- on the right. Each column has a name, a big number, and the spell or school.
 function factories.record(parent)
     local w = CreateFrame("Frame", nil, parent)
     w:SetSize(ROW_W, 70)
-    local half = ROW_W / 2 - 12
+    w.hl = Solid(w, "BACKGROUND", Theme.hover)
+    w.hl:SetAllPoints()
+    w.hl:Hide()
     w.title = Text(w, 10, Theme.dim, "CENTER")
     w.title:SetPoint("TOP", 0, -2)
-    for _, side in ipairs({ "left", "right" }) do
-        local anchor, justify = side == "left" and "TOPLEFT" or "TOPRIGHT", side == "left" and "LEFT" or "RIGHT"
-        w[side] = {
-            name = Text(w, 11, Theme.text, justify),
-            amount = Text(w, 17, Theme.text, justify),
-            sub = Text(w, 10, Theme.dim, justify),
-        }
-        w[side].name:SetPoint(anchor, 0, -17)
-        w[side].amount:SetPoint(anchor, 0, -32)
-        w[side].sub:SetPoint(anchor, 0, -52)
-        for _, fs in pairs(w[side]) do fs:SetWidth(half) end
+    for _, col in ipairs({ "left", "mid", "right" }) do
+        local anchor = (col == "left" and "TOPLEFT") or (col == "right" and "TOPRIGHT") or "TOP"
+        local justify = (col == "left" and "LEFT") or (col == "right" and "RIGHT") or "CENTER"
+        w[col] = { name = Text(w, 11, Theme.text, justify), amount = Text(w, 17, Theme.text, justify), sub = Text(w, 10, Theme.dim, justify) }
+        w[col].name:SetPoint(anchor, 0, -17)
+        w[col].amount:SetPoint(anchor, 0, -32)
+        w[col].sub:SetPoint(anchor, 0, -52)
     end
+    HookTooltip(w)
     return w
 end
 
@@ -523,23 +523,42 @@ end
 
 local CRIT_COLOR = { 1, 0.74, 0.2 }
 
-function UI:Record(y, title, a, b, nameA, classA, nameB, classB, multi, color)
+function UI:Record(y, title, kind, r, nameA, classA, nameB, classB, multi, sides, color)
     local w = self:Acquire("record")
     w.title:SetText(title)
-    local function fill(side, rec, name, class)
-        local label = KF.ClassText(name, class)
+    local third, whole = ROW_W / 3 - 6, ROW_W
+    local function fill(col, rec, label, width)
+        for _, fs in pairs(col) do fs:SetWidth(width) end
         if rec and multi and rec.ch then label = label .. KF.Colorize("  " .. rec.ch, rgb(Theme.dim)) end
-        side.name:SetText(label)
+        col.name:SetText(label)
         if rec then
-            side.amount:SetText(KF.Colorize(FN(rec.n), rgb(color or Theme.text)))
-            side.sub:SetText((rec.s or "Melee") .. (rec.d and (" on " .. rec.d) or "") .. "  ·  " .. date("%d %b", rec.t))
+            col.amount:SetText(KF.Colorize(FN(rec.n), rgb(color or Theme.text)))
+            col.sub:SetText((rec.s or "Melee") .. "  ·  " .. date("%d %b", rec.t))
         else
-            side.amount:SetText(KF.Colorize("-", rgb(Theme.dim)))
-            side.sub:SetText("no record yet")
+            col.amount:SetText(KF.Colorize("-", rgb(Theme.dim)))
+            col.sub:SetText("no record yet")
         end
     end
-    fill(w.left, a, nameA, classA)
-    fill(w.right, b, nameB, classB)
+    fill(w.mid, r.duo[kind], KF.Colorize("Together", rgb(Theme.accent)), sides and third or whole)
+    for _, col in ipairs({ w.left, w.right }) do
+        if sides then
+            fill(col, (col == w.left and r.me or r.partner)[kind], col == w.left and KF.ClassText(nameA, classA) or KF.ClassText(nameB, classB), third)
+        else
+            col.name:SetText("")
+            col.amount:SetText("")
+            col.sub:SetText("")
+        end
+    end
+    w.tooltip = function(tt)
+        tt:AddLine(title)
+        for _, e in ipairs({ { "Together", r.duo[kind], true }, { nameA, r.me[kind], sides }, { nameB, r.partner[kind], sides } }) do
+            local rec = e[2]
+            if rec and e[3] then
+                tt:AddDoubleLine(e[1], FN(rec.n), 1, 1, 1, 1, 1, 1)
+                tt:AddLine(("%s%s  ·  %s"):format(rec.s or "Melee", rec.d and (" on " .. rec.d) or "", date("%d %b %Y", rec.t)), 0.6, 0.6, 0.6)
+            end
+        end
+    end
     return self:Place(w, y, 2)
 end
 
@@ -621,7 +640,7 @@ function UI:Lists(j)
     if self.scope and j.pairs[self.scope] then set = { [self.scope] = j.pairs[self.scope] } end
     local L = { mobs = {}, rares = {}, bosses = {}, dungeons = {}, runs = {}, zones = {}, items = {}, log = {} }
     L.multi = not self.scope and count(j.pairs) > 1
-    L.records = { me = {}, partner = {} }
+    L.records = { me = {}, partner = {}, duo = {} }
 
     for key, p in pairs(set) do
         for id, e in pairs(p.mobs) do
@@ -661,7 +680,7 @@ function UI:Lists(j)
             it.by[key] = e.c
         end
         for i, e in ipairs(p.log) do L.log[#L.log + 1] = { e = e, pair = key, i = i } end
-        for _, who in ipairs({ "me", "partner" }) do
+        for _, who in ipairs({ "me", "partner", "duo" }) do
             for _, kind in ipairs({ "hit", "crit" }) do
                 local r = p.records and p.records[who] and p.records[who][kind]
                 local best = L.records[who][kind]
@@ -670,6 +689,16 @@ function UI:Lists(j)
         end
         local tough = p.toughest
         if tough and tough.n and (tough.lv or 0) > ((L.toughest and L.toughest.lv) or 0) then L.toughest = tough end
+    end
+
+    -- the shared record is never below either player's
+    for _, kind in ipairs({ "hit", "crit" }) do
+        local best = L.records.duo[kind]
+        for _, who in ipairs({ "me", "partner" }) do
+            local r = L.records[who][kind]
+            if r and (not best or r.n > best.n) then best = { n = r.n, s = r.s, d = r.d, t = r.t } end
+        end
+        L.records.duo[kind] = best
     end
 
     table.sort(L.runs, function(a, b) return (a.r.start or 0) > (b.r.start or 0) end)
@@ -777,11 +806,17 @@ function UI:BuildOverview(y, j, s, L)
     y = self:Split(y, "Items looted", sum(s.lootMe), sum(s.lootPartner), nameA, classA, nameB, classB)
     y = self:Split(y, "Deaths", s.deathsMe, s.deathsPartner, nameA, classA, nameB, classB)
 
-    local rm, rp = L.records.me, L.records.partner
-    if rm.hit or rm.crit or rp.hit or rp.crit then
+    local rec = L.records
+    if rec.duo.hit or rec.duo.crit then
         y = self:Section(y, "Records")
-        y = self:Record(y, "Biggest crit", rm.crit, rp.crit, nameA, classA, nameB, classB, L.multi, CRIT_COLOR)
-        y = self:Record(y, "Biggest hit", rm.hit, rp.hit, nameA, classA, nameB, classB, L.multi)
+        -- where the attacker can't be known (Forever), the per-player columns stay hidden unless asked for
+        local sides = not KF.recordsAreGuesses or KF.db.settings.guessRecords
+        if KF.recordsAreGuesses then
+            y = self:Note(y, sides and "Left and right are best guesses; the middle is the biggest hit in fights you share."
+                or "The biggest hit in fights you share. Who dealt it can't be known on Forever; /kf records adds experimental per-player guesses.")
+        end
+        y = self:Record(y, "Biggest crit", "crit", rec, nameA, classA, nameB, classB, L.multi, sides, CRIT_COLOR)
+        y = self:Record(y, "Biggest hit", "hit", rec, nameA, classA, nameB, classB, L.multi, sides)
     end
 
     y = self:Section(y, "Trivia")
