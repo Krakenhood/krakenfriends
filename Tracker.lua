@@ -28,7 +28,7 @@ end
 
 local function describe(unit, guid)
     local _, npc = guidParts(guid)
-    local info = { name = call(UnitName, unit), npc = npc, seen = time() }
+    local info = { name = call(UnitName, unit), npc = npc, seen = KF.Now() }
     if call(UnitIsPlayer, unit) then
         info.type = "player"
     else
@@ -61,7 +61,7 @@ function T:ScanUnit(unit)
         info = describe(unit, guid)
         mobs[guid] = info
     else
-        info.seen = time()
+        info.seen = KF.Now()
     end
     if not info.engaged and not call(UnitIsTapDenied, unit) and self:FightingUs(unit) then
         info.engaged = true
@@ -85,11 +85,11 @@ function T:DescribeGUID(guid)
         return info
     end
     local kind, npc = guidParts(guid)
-    return { name = call(UnitNameFromGUID, guid), npc = npc, type = kind == "Player" and "player" or "unknown", seen = time() }
+    return { name = call(UnitNameFromGUID, guid), npc = npc, type = kind == "Player" and "player" or "unknown", seen = KF.Now() }
 end
 
 function T:Prune()
-    local cutoff = time() - FORGET_AFTER
+    local cutoff = KF.Now() - FORGET_AFTER
     for guid, info in pairs(mobs) do
         if (info.seen or 0) < cutoff then mobs[guid] = nil end
     end
@@ -116,7 +116,7 @@ function T:RecordKill(guid, by, via)
     if not KF.together then return end
 
     local info = mobs[guid] or self:DescribeGUID(guid)
-    counted[guid] = { t = time(), by = by }
+    counted[guid] = { t = KF.Now(), by = by }
     local j, pair = KF.journey, KF:CurrentPair()
 
     KF:Add("kills")
@@ -158,7 +158,7 @@ function T:RecordRare(info)
     local key = info.npc or info.name or "?"
     local r = pair.rares[key]
     if not r then
-        r = { n = info.name, c = 0, t = time(), lv = info.level }
+        r = { n = info.name, c = 0, t = KF.Now(), lv = info.level }
         pair.rares[key] = r
     end
     r.c = r.c + 1
@@ -170,7 +170,7 @@ end
 
 function T:RecordBoss(name)
     if not name or not KF.together then return end
-    local now = time()
+    local now = KF.Now()
     if lastBoss[name] and now - lastBoss[name] < 120 then return end
     lastBoss[name] = now
 
@@ -318,6 +318,10 @@ local function targeting(who, unit)
 end
 
 function T:OnUnitCombat(unit, event, flagText, amount, school)
+    -- Off unless switched on with /kf records. The game doesn't say who dealt a hit and
+    -- the damage numbers cover anyone hitting a creature, so on Forever this can't be
+    -- made reliable: both the shared record and the per-player guesses are experimental.
+    if not KF.db.settings.guessRecords then return end
     if not (KF.partner and KF.together) then return end
     unit, event, flagText, amount, school = clean(unit), clean(event), clean(flagText), clean(amount), clean(school)
     if type(unit) ~= "string" or event ~= "WOUND" or type(amount) ~= "number" or amount <= 0 then return end
@@ -435,7 +439,7 @@ function T:IsPartnerName(name, guid)
     local p = KF.partner
     if not p then return false end
     if guid and guid == p.guid then return true end
-    return name == p.name or name == p.key or name:match("^([^%-]+)") == p.name
+    return name == p.name or name == p.key or name:match("^([^%-]+)") == p.name or KF.IsSender(name, p)
 end
 
 function T:OnLoot(text, _, _, _, _, _, _, _, _, _, _, guid)
@@ -459,7 +463,7 @@ function T:RecordItem(who, itemID, link, qty)
     local q = qualityOf(link, itemID)
     KF:Add(who == "me" and "lootMe" or "lootPartner", qty, q)
     if q >= 2 then
-        local pair, now = KF:CurrentPair(), time()
+        local pair, now = KF:CurrentPair(), KF.Now()
         local item = pair.items[itemID]
         if not item then
             item = { n = link:match("%[(.-)%]"), q = q, c = 0, t = now }
@@ -469,7 +473,7 @@ function T:RecordItem(who, itemID, link, qty)
         if who == "me" then item.me = (item.me or 0) + qty else item.pa = (item.pa or 0) + qty end
         if q >= 4 then
             local _, r, g, b = KF.QualityInfo(q)
-            local text = ("%s found %s"):format(who == "me" and KF.me.name or KF.partner.name, KF.Colorize(item.n or "?", r, g, b))
+            local text = ("%s found %s"):format(who == "me" and KF.DisplayName(KF.me.key) or KF.DisplayName(KF.partner.key), KF.Colorize(item.n or "?", r, g, b))
             KF:Log("loot", text)
             KF:Toast("Epic find!", text, "epic")
         end
@@ -515,7 +519,7 @@ function T:CheckInstance()
     if not ok then return end
     name, itype, instanceID = clean(name), clean(itype), clean(instanceID)
     local dungeon = (itype == "party" or itype == "raid") and instanceID or nil
-    local run, now = j.currentRun, time()
+    local run, now = j.currentRun, KF.Now()
 
     if run then
         local stale = not run.inside and now - (run.last or 0) > RUN_TIMEOUT
@@ -535,7 +539,7 @@ end
 function T:StartRun(j, id, name)
     local pair, pairKey = KF:CurrentPair()
     if not pair then return end
-    local now = time()
+    local now = KF.Now()
     j.currentRun = { id = id, n = name, pair = pairKey, start = now, last = now, inside = true, kills = 0, bosses = 0, deaths = 0 }
     KF:Add("runs")
     local d = pair.dungeons[id]
@@ -564,6 +568,7 @@ function T:FinishRun(j)
     table.insert(owner.runs, 1, { n = run.n, start = run.start, dur = dur, kills = run.kills, bosses = run.bosses, deaths = run.deaths })
     while #owner.runs > 30 do table.remove(owner.runs) end
     KF:Debug("run finished: %s, %ss", run.n, dur)
+    KF:Fire("RUN_FINISHED")
     KF:Fire("UPDATE")
 end
 
@@ -627,7 +632,7 @@ function T:OnLevelUp(level)
     KF:NoteLevels()
     if not KF.together then return end
     KF:Add("levelsMe")
-    KF:Log("level", ("%s reached level %s"):format(KF.me.name, level))
+    KF:Log("level", ("%s reached level %s"):format(KF.DisplayName(KF.me.key), level))
 end
 
 function T:OnUnitLevel(unit)
@@ -642,7 +647,7 @@ function T:OnUnitLevel(unit)
     KF:NoteLevels()
     if old and level > old and KF.together then
         KF:Add("levelsPartner")
-        KF:Log("level", ("%s reached level %s"):format(p.name, level))
+        KF:Log("level", ("%s reached level %s"):format(KF.DisplayName(p.key), level))
     end
 end
 
@@ -658,7 +663,7 @@ function T:CheckZone()
     local zone = call(GetRealZoneText)
     local pair = KF:CurrentPair()
     if not zone or zone == "" or not pair then return end
-    pair.zones[zone] = pair.zones[zone] or time()
+    pair.zones[zone] = pair.zones[zone] or KF.Now()
     if KF:First("zone", zone) then
         KF:Log("zone", ("Discovered %s together"):format(zone))
     end

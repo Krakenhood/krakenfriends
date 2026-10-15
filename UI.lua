@@ -157,7 +157,7 @@ local function ClassName(class)
 end
 
 local function ShortName(key)
-    return key and key:match("^[^%-]+") or "?"
+    return key and KF.DisplayName(key) or "?"
 end
 
 local function Tooltip(owner, fn)
@@ -601,12 +601,12 @@ end
 function UI:PartnerDisplay(j)
     local p = KF.partner
     if p and p.journey == j then
-        return p.name, p.class, call(UnitLevel, p.unit) or p.level, p.unit
+        return KF.DisplayName(p.key), p.class, call(UnitLevel, p.unit) or p.level, p.unit, p.key
     end
     local key = j.lastPartnerChar
     if not (key and j.chars.partner[key]) then key = next(j.chars.partner) end
     local info = key and j.chars.partner[key] or {}
-    return key and ShortName(key) or j.partnerName or "?", info.class, info.level
+    return key and ShortName(key) or j.partnerName or "?", info.class, info.level, nil, key
 end
 
 -- Names for the two sides: character names when one chapter is selected,
@@ -618,9 +618,10 @@ function UI:Names(j)
     return "You", KF.me.class, j.partnerName or pName, pClass
 end
 
-local function PairLabel(pair, plain)
-    if plain then return ShortName(pair.me) .. " & " .. ShortName(pair.partner) end
-    return KF.ClassText(ShortName(pair.me), pair.meClass) .. " & " .. KF.ClassText(ShortName(pair.partner), pair.partnerClass)
+local function PairLabel(pair, plain, full)
+    local name = full and KF.FullName or ShortName
+    if plain then return name(pair.me) .. " & " .. name(pair.partner) end
+    return KF.ClassText(name(pair.me), pair.meClass) .. " & " .. KF.ClassText(name(pair.partner), pair.partnerClass)
 end
 
 -- Tooltip lines saying which chapters an entry comes from.
@@ -767,7 +768,10 @@ function UI:BuildCharacters(y, j)
         end
         local selected = self.scope == key
         w.sel:SetShown(selected)
-        w.tooltip = selected and "Click to show all characters again." or "Click to show only this pair of characters."
+        w.tooltip = function(tt)
+            tt:AddLine(PairLabel(pair, true, true))
+            tt:AddLine(selected and "Click to show all characters again." or "Click to show only this pair of characters.", 0.6, 0.6, 0.6, true)
+        end
         w:SetScript("OnClick", function()
             UI.scope = (UI.scope ~= key) and key or nil
             UI:Refresh()
@@ -807,13 +811,12 @@ function UI:BuildOverview(y, j, s, L)
     y = self:Split(y, "Deaths", s.deathsMe, s.deathsPartner, nameA, classA, nameB, classB)
 
     local rec = L.records
-    if rec.duo.hit or rec.duo.crit then
+    -- where the attacker can't be known (Forever) the records are experimental and hidden unless switched on
+    if (not KF.recordsAreGuesses or KF.db.settings.guessRecords) and (rec.duo.hit or rec.duo.crit) then
         y = self:Section(y, "Records")
-        -- where the attacker can't be known (Forever), the per-player columns stay hidden unless asked for
-        local sides = not KF.recordsAreGuesses or KF.db.settings.guessRecords
+        local sides = true
         if KF.recordsAreGuesses then
-            y = self:Note(y, sides and "Left and right are best guesses; the middle is the biggest hit in fights you share."
-                or "The biggest hit in fights you share. Who dealt it can't be known on Forever; /kf records adds experimental per-player guesses.")
+            y = self:Note(y, "Experimental (/kf records): left and right are best guesses; the middle is the biggest hit in fights you share.")
         end
         y = self:Record(y, "Biggest crit", "crit", rec, nameA, classA, nameB, classB, L.multi, sides, CRIT_COLOR)
         y = self:Record(y, "Biggest hit", "hit", rec, nameA, classA, nameB, classB, L.multi, sides)
@@ -979,7 +982,7 @@ function UI:BuildDungeons(y, j, s, L)
 
     if run then
         y = self:Section(y, "Current run")
-        y = self:Row(y, { icon = "dungeon", label = run.n or "?", value = KF.FormatDuration(time() - run.start),
+        y = self:Row(y, { icon = "dungeon", label = run.n or "?", value = KF.FormatDuration(KF.Now() - run.start),
             detail = ("%d kills  ·  %d bosses"):format(run.kills or 0, run.bosses or 0) })
     end
 
@@ -1033,7 +1036,7 @@ function UI:BuildJournal(y, j, _, L)
     local log = L.log
     if #log == 0 then return self:Note(y, "Your story will be written here: first kills, rares, bosses, epic loot, new zones and milestones.") end
     local today, lastDay = date("%Y%m%d"), nil
-    local yesterday = date("%Y%m%d", time() - 86400)
+    local yesterday = date("%Y%m%d", KF.Now() - 86400)
     for i = #log, math.max(1, #log - 200), -1 do
         local e, pair = log[i].e, j.pairs[log[i].pair]
         local day = date("%Y%m%d", e.t)
@@ -1086,6 +1089,25 @@ local function CreateCard(parent, side)
         card.name:SetPoint("TOPRIGHT", card.ring, "TOPLEFT", -10, -6)
         card.sub:SetPoint("TOPRIGHT", card.name, "BOTTOMRIGHT", 0, -4)
     end
+    -- hovering the card shows the full two-word name
+    local hit = CreateFrame("Frame", nil, parent)
+    if side == "LEFT" then
+        hit:SetPoint("TOPLEFT", card.ring, "TOPLEFT")
+        hit:SetPoint("BOTTOMRIGHT", card.name, "BOTTOMRIGHT")
+    else
+        hit:SetPoint("TOPLEFT", card.name, "TOPLEFT")
+        hit:SetPoint("BOTTOMRIGHT", card.ring, "BOTTOMRIGHT")
+    end
+    hit:EnableMouse(true)
+    hit:SetScript("OnEnter", function(self)
+        if card.full then
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            GameTooltip:AddLine(card.full, 1, 1, 1)
+            GameTooltip:Show()
+        end
+    end)
+    hit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    card.hit = hit
     return card
 end
 
@@ -1289,12 +1311,15 @@ function UI:RefreshHeader(j, withPortraits)
         local mine, theirs = j.chars.me[pair.me] or {}, j.chars.partner[pair.partner] or {}
         FillCard(self.meCard, ShortName(pair.me), pair.meClass, meUnit and call(UnitLevel, "player") or mine.level, meUnit, withPortraits)
         FillCard(self.partnerCard, ShortName(pair.partner), pair.partnerClass, pUnit and call(UnitLevel, pUnit) or theirs.level, pUnit, withPortraits)
+        self.meCard.full, self.partnerCard.full = KF.FullName(pair.me), KF.FullName(pair.partner)
     else
-        FillCard(self.meCard, KF.me.name, KF.me.class, call(UnitLevel, "player"), "player", withPortraits)
+        FillCard(self.meCard, KF.DisplayName(KF.me.key), KF.me.class, call(UnitLevel, "player"), "player", withPortraits)
+        self.meCard.full = KF.FullName(KF.me.key)
     end
 
     if not j then
         FillCard(self.partnerCard, "?", nil, nil, nil, withPortraits)
+        self.partnerCard.full = nil
         self.partnerCard.sub:SetText("No partner yet")
         self.dot:SetColorTexture(Theme.dim[1], Theme.dim[2], Theme.dim[3], 1)
         self.status:SetText("Group up with a friend to begin")
@@ -1303,13 +1328,14 @@ function UI:RefreshHeader(j, withPortraits)
     end
 
     if not pair then
-        local pName, pClass, pLevel, pUnit = self:PartnerDisplay(j)
+        local pName, pClass, pLevel, pUnit, pKey = self:PartnerDisplay(j)
         FillCard(self.partnerCard, pName, pClass, pLevel, pUnit, withPortraits)
+        self.partnerCard.full = pKey and KF.FullName(pKey) or nil
     end
 
     local label, color = status(j)
     local s = self:ViewStats(j)
-    local day = math.floor((time() - (j.started or time())) / 86400) + 1
+    local day = math.floor((KF.Now() - (j.started or KF.Now())) / 86400) + 1
     self.dot:SetColorTexture(color[1], color[2], color[3], 1)
     self.status:SetText(KF.Colorize(label, rgb(color)) .. ("   ·   Day %d   ·   %s"):format(day, KF.FormatDuration(s.time)))
 
@@ -1326,6 +1352,7 @@ end
 function UI:Refresh()
     if not (self.frame and self.frame:IsShown()) then return end
     self.pending = false
+    KF:RebuildNames()
     local j = self:ViewedJourney()
     if self.scope and not (j and j.pairs[self.scope]) then self.scope = nil end
     self:RefreshHeader(j, true)
@@ -1382,7 +1409,7 @@ function UI:MenuEntries()
         for _, key in ipairs(keys) do
             local pair = viewed.pairs[key]
             entries[#entries + 1] = {
-                text = PairLabel(pair),
+                text = PairLabel(pair, false, true),
                 checked = self.scope == key, func = function() UI.scope = key end,
             }
         end

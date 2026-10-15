@@ -24,6 +24,7 @@ function KF:InitPlayer()
     }
     self.me.key = self.me.name .. "-" .. realm
     self:LocalizeTypes()
+    self:RebuildNames()
     self:RefreshJourney()
 end
 
@@ -82,7 +83,7 @@ function KF:BindPartner(c)
     local tag = c.tag or battleTagFor(c.guid)
     if tag and not j.partnerTag then j.partnerTag = tag end
 
-    local now = time()
+    local now = KF.Now()
     local theirs = j.chars.partner[c.key] or {}
     theirs.class, theirs.level, theirs.seen = p.class or theirs.class, p.level or theirs.level, now
     j.chars.partner[c.key] = theirs
@@ -91,6 +92,7 @@ function KF:BindPartner(c)
     j.chars.me[self.me.key] = mine
     j.lastPartnerChar, j.lastMyChar = c.key, self.me.key
     self.db.active = j.id
+    self:RebuildNames()
 end
 
 -- The chapter for the two characters playing right now ("Krakenhood &
@@ -216,7 +218,7 @@ function KF:StartJourneyWith(unit, guid)
         local id = tag or ("char:" .. key)
         j = self.db.journeys[id] or self:NewJourney(id, tag and tag:match("^[^#]+") or name, tag)
         local _, class = call(UnitClass, unit)
-        j.chars.partner[key] = { class = class, level = call(UnitLevel, unit), seen = time() }
+        j.chars.partner[key] = { class = class, level = call(UnitLevel, unit), seen = KF.Now() }
         self.db.active = j.id
         self:BindPartner({ unit = unit, guid = guid, key = key, name = name, tag = tag, journey = j })
         self:RefreshJourney()
@@ -289,8 +291,11 @@ function KF:PrintStatus()
     local p, j = self.partner, self.journey
     self:Printf("v%s, data source: %s", self.version, self.dbSource or "?")
     self:Printf("addon messages to your friend: %s", self.messagingWorks and "work (tested with /kf ping)" or "untested (try /kf ping)")
+    local b = self.db.backup
+    if b and b.t then self:Printf("backup for /kf restore: the state before the sync at %s", date("%d %b %H:%M", b.t)) end
+    self:Printf("syncing with your friend: %s%s", self.db.settings.sync and "on" or "off", self.Sync and self.Sync.lastSync and (", last exchange " .. date("%H:%M", self.Sync.lastSync.t)) or "")
     if p then
-        self:Printf("partner: %s (%s), %s", KF.ClassText(p.name, p.class), p.unit,
+        self:Printf("partner: %s (%s), %s", KF.ClassText(KF.DisplayName(p.key), p.class), p.unit,
             self.together and "|cff5cdb78together: tracking|r" or "|cff8a8f98apart: paused|r")
     else
         self:Print("partner: nobody from your journeys is in your group" .. (j and (" (last journey: " .. (j.partnerName or "?") .. ")") or ""))

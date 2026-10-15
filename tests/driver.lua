@@ -21,6 +21,7 @@ UNITS.player = { guid = ME, name = "Krakenhood", realm = "Forever", class = "MAG
 section("login")
 FireEvent("ADDON_LOADED", "Krakenfriends")
 FireEvent("PLAYER_LOGIN")
+KF.db.settings.sync = false -- the sync has its own section; keep it quiet in the others
 FireEvent("PLAYER_ENTERING_WORLD", true, false)
 check(KF.ready and KF.me.key == "Krakenhood-Forever", "player identity")
 check(KF.dbSource == "new", "fresh database")
@@ -360,10 +361,12 @@ KF:SubmitHit("partner", 700, true, "Smite", "Other Dummy")
 
 -- the Overview shows them, merged across chapters
 UI.scope = nil
+SlashCmdList.KRAKENFRIENDS("records")
 CAPTURE = {}
 UI:SelectTab("Overview")
 local ovText = table.concat(CAPTURE, " | ")
 CAPTURE = nil
+SlashCmdList.KRAKENFRIENDS("records")
 check(ovText:find("RECORDS") and ovText:find("Biggest crit") and ovText:find("3,600"), "Records block on the Overview")
 print("  [records] " .. ovText:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):match("RECORDS.-TRIVIA") or "?")
 
@@ -375,6 +378,17 @@ UNITS.target = { guid = "Creature-0-1-0-1-3100-00000400", name = "Pack Wolf", ho
 UNITS.nameplate7 = { guid = "Creature-0-1-0-1-3101-00000401", name = "Idle Wolf", hostile = true, ctype = 1, level = 12 }
 UNITS.party1.target = nil
 TickAll()
+-- off by default: nothing at all is recorded, not even the shared record
+FireEvent("UNIT_COMBAT", "target", "WOUND", "CRITICAL", 555, 4)
+check(dp.records.duo.crit == nil and dp.records.me.crit == nil, "with the feature off (the default) nothing is recorded")
+CAPTURE = {}
+KF.UI.scope = nil
+KF.UI:SelectTab("Overview")
+check(not table.concat(CAPTURE, " | "):find("RECORDS"), "...and the Records block is hidden")
+CAPTURE = nil
+SlashCmdList.KRAKENFRIENDS("records")
+check(KF.db.settings.guessRecords == true, "/kf records switches the experimental records on")
+Advance(5) -- casts from the earlier tests must not count as recent
 -- together: a crit on a creature we are fighting is recorded for the duo, with its school named
 FireEvent("UNIT_COMBAT", "target", "WOUND", "CRITICAL", 777, 4)
 check(dp.records.duo.crit and dp.records.duo.crit.n == 777 and dp.records.duo.crit.s == "Fire", "together record: crit on a creature we fight, school named")
@@ -393,18 +407,17 @@ check(dp.records.duo.crit.n == 777, "a creature nobody is fighting is ignored")
 -- a normal hit only raises the hit record
 FireEvent("UNIT_COMBAT", "target", "WOUND", "", 900, 1)
 check(dp.records.duo.hit.n == 900 and dp.records.duo.hit.s == "Physical" and dp.records.duo.crit.n == 777, "normal hit raises only the biggest hit")
--- the Overview shows only the middle column while guessing is off
+-- once it is on, the Overview shows the shared record and the per-player columns
 CAPTURE = {}
 KF.UI.scope = nil
 KF.UI:SelectTab("Overview")
-local off = table.concat(CAPTURE, " | ")
+local shown = table.concat(CAPTURE, " | ")
 CAPTURE = nil
-check(off:find("Together") and off:find("777") and off:find("can't be known on Forever"), "Overview: shared record and explanation while guessing is off")
-check(not off:find("no record yet"), "...and no empty per-player columns")
+check(shown:find("Together") and shown:find("777") and shown:find("Experimental"), "Overview: the shared record, marked experimental")
+check(shown:find("no record yet"), "...with the per-player columns beside it")
 
--- school matching with guessing on: both of us cast on the same creature
-SlashCmdList.KRAKENFRIENDS("records")
-check(KF.db.settings.guessRecords == true, "guessing switched on")
+-- school matching: both of us cast on the same creature
+check(KF.db.settings.guessRecords == true, "the experimental records are on")
 UNITS.party1.target = "target"
 Advance(5)
 FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "c1", 133)   -- my Fireball (fire)
@@ -429,7 +442,7 @@ CAPTURE = {}
 KF.UI:Refresh()
 local on = table.concat(CAPTURE, " | ")
 CAPTURE = nil
-check(on:find("Left and right are best guesses") and on:find("Together") and on:find("9,999"), "Overview: three columns once guessing is on")
+check(on:find("best guesses") and on:find("Together") and on:find("9,999"), "Overview: three columns once guessing is on")
 -- the tooltip builder runs without errors
 local rec = KF.UI:Lists(KF.journey).records
 check(rec.duo.crit.n == 9999 and rec.me.crit.n == 1111 and rec.partner.crit.n == 1222, "merged records keep the three apart")
@@ -441,11 +454,11 @@ KF:SubmitHit("duo", 321, true, "Fire", "Training Dummy")
 CAPTURE = {}
 SlashCmdList.KRAKENFRIENDS("records")
 Advance(1)
-check(table.concat(CAPTURE, " | "):find("Left and right are best guesses"), "/kf records redraws the open window immediately")
+check(table.concat(CAPTURE, " | "):find("best guesses"), "/kf records redraws the open window immediately")
 CAPTURE = {}
 SlashCmdList.KRAKENFRIENDS("records")
 Advance(1)
-check(table.concat(CAPTURE, " | "):find("can't be known on Forever"), "...and switching it off does too")
+check(not table.concat(CAPTURE, " | "):find("RECORDS"), "...and switching it off hides the block right away")
 CAPTURE = nil
 SlashCmdList.KRAKENFRIENDS("records reset")
 
@@ -488,13 +501,524 @@ local sawStatus = false
 for i = chatBefore, #CHAT do if CHAT[i]:find("addon messages to your friend: work") then sawStatus = true end end
 check(sawStatus, "/kf status reports the messaging result")
 
+section("sync with the friend's copy")
+local S = KF.Sync
+local j = KF.journey
+local me, alt, friend = "Krakenhood-Forever", "Thaliadin-Forever", "Thalianne-Forever"
+local myAlt = KF:CurrentPair()                         -- "Krakenhood & Thaliadin"
+check(myAlt and myAlt.me == me and myAlt.partner == alt, "the current chapter is Krakenhood & Thaliadin")
+KF.db.settings.sync = true
+local function say(text, sender) FireEvent("CHAT_MSG_ADDON", "KRAKENFR", text, "PARTY", sender or alt) end
+local TAG = j.partnerTag or "Thalia#1234"
+local function chat(substring)
+    for i = #CHAT, 1, -1 do if CHAT[i]:find(substring, 1, true) then return true end end
+    return false
+end
+local function drain() for _ = 1, 60 do Advance(0.4) end end
+drain()
+
+-- before anything: a chapter message without a hello is ignored
+local q0 = myAlt.stats.quests
+say("C|" .. alt .. "|" .. me .. "|WARRIOR|MAGE|q=50")
+check(myAlt.stats.quests == q0, "chapter data without a hello is ignored")
+
+-- a friend's hello, then his numbers: his count is higher, so mine is raised
+say("H|1|1.2.0|" .. TAG)
+local totalQ = j.total.quests
+say("C|" .. alt .. "|" .. me .. "|WARRIOR|MAGE|q=" .. (q0 + 5))
+check(myAlt.stats.quests == q0 + 5, "the larger quest count wins")
+check(j.total.quests == totalQ + 5, "the journey total grows by the same amount")
+-- a lower number does nothing, and so does sending the same thing twice
+say("C|" .. alt .. "|" .. me .. "|WARRIOR|MAGE|q=" .. (q0 + 3))
+say("C|" .. alt .. "|" .. me .. "|WARRIOR|MAGE|q=" .. (q0 + 5))
+check(myAlt.stats.quests == q0 + 5 and j.total.quests == totalQ + 5, "a lower or repeated number changes nothing")
+
+-- his "me" is my "partner": killing blows, deaths, levels and loot are swapped
+local kbp, kbm = myAlt.stats.kbPartner, myAlt.stats.kbMe
+say("C|" .. alt .. "|" .. me .. "|WARRIOR|MAGE|a=" .. (kbp + 7) .. ";p=" .. (kbm + 2) .. ";d=4;f=1;L2=6;P3=2")
+check(myAlt.stats.kbPartner == kbp + 7 and myAlt.stats.kbMe == kbm + 2, "his killing blows are my partner's, and the reverse")
+check(myAlt.stats.deathsPartner >= 4 and myAlt.stats.deathsMe >= 1, "deaths swapped")
+check((myAlt.stats.lootPartner[2] or 0) >= 6 and (myAlt.stats.lootMe[3] or 0) >= 2, "loot by quality swapped")
+-- creature types: known ones only
+say("C|" .. alt .. "|" .. me .. "|WARRIOR|MAGE|y.beast=40;y.nonsense=9;k=" .. (myAlt.stats.kills + 4))
+check((myAlt.stats.types.beast or 0) >= 40 and myAlt.stats.types.nonsense == nil, "known creature types merge, unknown ones are ignored")
+
+-- another pair of characters stays its own chapter and never touches this one
+local killsBefore, chaptersBefore = myAlt.stats.kills, 0
+for _ in pairs(j.pairs) do chaptersBefore = chaptersBefore + 1 end
+local totalKills = j.total.kills
+say("C|" .. alt .. "|Krakenalt-Forever|WARRIOR|MAGE|k=11;q=2")
+local newPair = j.pairs["Krakenalt-Forever & " .. alt]
+check(newPair and newPair.stats.kills == 11 and newPair.stats.quests == 2, "an unknown character pair is added as its own chapter")
+check(newPair.me == "Krakenalt-Forever" and newPair.partner == alt, "...seen from my side")
+check(myAlt.stats.kills == killsBefore, "...and the other chapter is untouched")
+check(j.total.kills == totalKills + 11, "...while the journey total counts it")
+
+-- strangers, other protocols, other BattleTags, bad values: ignored
+local q1 = myAlt.stats.quests
+say("C|" .. alt .. "|" .. me .. "|WARRIOR|MAGE|q=900", "Stranger-Forever")
+say("H|2|9.9|" .. TAG)
+say("C|" .. alt .. "|" .. me .. "|WARRIOR|MAGE|q=901")
+check(myAlt.stats.quests == q1, "a stranger and an unknown protocol are ignored")
+say("H|1|1.2.0|Someone#9999")
+say("C|" .. alt .. "|" .. me .. "|WARRIOR|MAGE|q=902")
+check(myAlt.stats.quests == q1, "another BattleTag is ignored")
+say("H|1|1.2.0|" .. TAG)
+say("C|" .. alt .. "|" .. me .. "|WARRIOR|MAGE|q=-5;k=abc;e=99999999999;r=")
+check(myAlt.stats.quests == q1 and myAlt.stats.elite < 99999999999, "negative, non-numeric and absurd values are ignored")
+say(SECRET and "C|x" or "C|x")
+say("C|" .. alt .. "|" .. me .. "|WARRIOR|MAGE|q=" .. (q1 + 1))
+FireEvent("CHAT_MSG_ADDON", "KRAKENFR", SECRET, "PARTY", alt)
+check(myAlt.stats.quests == q1 + 1, "a hidden (secret) message is ignored without errors")
+
+-- the shared record travels too
+say("R|" .. alt .. "|" .. me .. "|crit|4321|1790000000|Fire|Pack Wolf")
+check(myAlt.records.duo.crit and myAlt.records.duo.crit.n >= 4321, "a bigger shared record is taken over")
+say("R|" .. alt .. "|" .. me .. "|crit|10|1790000000|Fire|Pack Wolf")
+check(myAlt.records.duo.crit.n >= 4321, "...and a smaller one is not")
+
+-- the changes are reported in one line per chapter
+Advance(3)
+check(chat("synced with Thalia"), "what changed is printed")
+check(chat("quests"), "...naming the counters")
+
+-- sending: our chapters, from our side, in small messages
+SENT = {}
+SlashCmdList.KRAKENFRIENDS("sync")
+local again = S:Push()
+check(again == false, "an automatic push right after a sync is skipped")
+drain()
+check(#SENT >= 3 and SENT[1].text:find("^H|1|"), "/kf sync starts with a hello")
+local sawChapter, tooBig = false, false
+for _, m in ipairs(SENT) do
+    if #m.text > 255 then tooBig = true end
+    local prefix = "C|" .. me .. "|" .. alt .. "|"
+    if m.text:sub(1, #prefix) == prefix then sawChapter = true end
+end
+check(sawChapter and not tooBig, "our chapter goes out from our side, every message within 255 bytes")
+check(SENT[1].prefix == "KRAKENFR" and SENT[1].chan == "PARTY", "sent on the party channel")
+local n = #SENT
+-- a hello from the friend after a quiet while is answered once
+Advance(120)
+n = #SENT
+say("H|1|1.2.0|" .. TAG)
+drain()
+check(#SENT > n and SENT[n + 1].text:find("^H|1|"), "a friend's hello is answered with our own journey")
+n = #SENT
+say("H|1|1.2.0|" .. TAG)
+drain()
+check(#SENT == n, "...but not again right away (no ping-pong)")
+
+-- when the game says "too fast", the same message is tried again instead of giving up
+Advance(120)
+SENT = {}
+SEND_RESULTS = { 3, 3 }
+S:Push(true)
+drain()
+local first = SENT[1] and SENT[1].text
+check(#SENT >= 5 and SENT[2].text == first and SENT[3].text == first and SENT[4].text ~= first, "a throttled message is retried, then the push carries on")
+SEND_RESULTS = nil
+-- a hard refusal stops the push without errors
+Advance(120)
+SENT = {}
+SEND_RESULTS = { 9 }
+S:Push(true)
+drain()
+check(#SENT == 1, "a refused message stops the push")
+SEND_RESULTS = nil
+
+-- big chapters still fit
+local big = KF.NewPair("A-Forever", "MAGE", "B-Forever", "PRIEST")
+for name in pairs(KF.TypeInfo) do big.stats.types[name] = 123456 end
+for q = 0, 5 do big.stats.lootMe[q] = 99999; big.stats.lootPartner[q] = 88888 end
+big.stats.kills, big.stats.quests, big.stats.time, big.stats.goldDuo = 999999, 99999, 9999999, 999999999
+local fits = true
+for _, m in ipairs(S.Messages(big)) do if #m > 255 then fits = false end end
+check(fits and #S.Messages(big) >= 2, "a very full chapter is split into messages that fit")
+
+-- off means off: nothing is sent and nothing is taken in
+SlashCmdList.KRAKENFRIENDS("sync off")
+check(KF.db.settings.sync == false, "/kf sync off")
+local q2 = myAlt.stats.quests
+say("C|" .. alt .. "|" .. me .. "|WARRIOR|MAGE|q=" .. (q2 + 50))
+check(myAlt.stats.quests == q2, "nothing is taken in while syncing is off")
+SENT = {}
+SlashCmdList.KRAKENFRIENDS("sync")
+check(#SENT == 0 and chat("syncing is off"), "nothing is sent while syncing is off")
+SlashCmdList.KRAKENFRIENDS("sync on")
+check(KF.db.settings.sync == true, "/kf sync on")
+KF.db.settings.sync = false
+
+section("names: two-word characters")
+do
+    local j = KF.journey
+    KF:RebuildNames()
+    check(KF.DisplayName("Thaliadin-Forever") == "Thaliadin", "a unique first name is shown as it is")
+    check(KF.FullName("Naendor-Delorentis") == "Naendor Delorentis", "the full name is the two words")
+    check(KF.NormName("Naendor Delorentis") == KF.NormName("naendor-delorentis"), "spellings of one name compare equal")
+    -- two of the characters share a first name: the surname's initial tells them apart
+    j.chars.me["Miss-Hazecaller"] = { class = "MAGE" }
+    j.chars.me["Miss-Zephyrgale"] = { class = "PRIEST" }
+    KF:RebuildNames()
+    check(KF.DisplayName("Miss-Hazecaller") == "Miss H." and KF.DisplayName("Miss-Zephyrgale") == "Miss Z.", "characters sharing a first name get the surname's initial")
+    check(KF.DisplayName("Thaliadin-Forever") == "Thaliadin", "...while other names stay short")
+    j.pairs["Miss-Hazecaller & Thaliadin-Forever"] = KF.NewPair("Miss-Hazecaller", "MAGE", "Thaliadin-Forever", "WARRIOR")
+    CAPTURE = {}
+    KF.UI.scope = nil
+    KF.UI:SelectTab("Overview")
+    local text = table.concat(CAPTURE, " | ")
+    CAPTURE = nil
+    check(text:find("Miss H.", 1, true), "the Characters list shows the abbreviated pair")
+    j.pairs["Miss-Hazecaller & Thaliadin-Forever"] = nil
+    j.chars.me["Miss-Hazecaller"], j.chars.me["Miss-Zephyrgale"] = nil, nil
+    KF:RebuildNames()
+    check(KF.DisplayName("Miss-Hazecaller") == "Miss", "...and back to the first name once the clash is gone")
+end
+
+section("sync: the sender's spelling")
+do
+    local S = KF.Sync
+    local j = KF.journey
+    local pair = KF:CurrentPair()
+    KF.db.settings.sync = true
+    local function from(sender, text) FireEvent("CHAT_MSG_ADDON", "KRAKENFR", text, "PARTY", sender) end
+    local TAG = j.partnerTag or "Thalia#1234"
+    local chapters = 0
+    for _ in pairs(j.pairs) do chapters = chapters + 1 end
+
+    -- Forever delivers two-word names with a space; the keys use a hyphen
+    from("Thaliadin Forever", "H|1|1.2.0|" .. TAG)
+    local q = pair.stats.quests
+    from("Thaliadin Forever", "C|Thaliadin Forever|Krakenhood Forever|WARRIOR|MAGE|q=" .. (q + 2))
+    check(pair.stats.quests == q + 2, "a sender written with a space is recognised")
+    local after = 0
+    for _ in pairs(j.pairs) do after = after + 1 end
+    check(after == chapters, "...and its chapter is matched to the existing one, not added twice")
+    from("thaliadin-forever", "C|Thaliadin-Forever|Krakenhood-Forever|WARRIOR|MAGE|q=" .. (q + 3))
+    check(pair.stats.quests == q + 3, "hyphen and capitals work the same")
+
+    -- someone with the same first name but another surname is not the partner
+    from("Thaliadin Smith", "H|1|1.2.0|" .. TAG)
+    from("Thaliadin Smith", "C|Thaliadin Smith|Krakenhood Forever|WARRIOR|MAGE|q=" .. (q + 500))
+    check(pair.stats.quests == q + 3, "a stranger with the same first name is ignored")
+    from("Thaliadin Forever", "H|1|1.2.0|" .. TAG)
+
+    -- our own messages, echoed back by the game in any spelling, are ignored
+    KF.messagingWorks = nil
+    local n = #SENT
+    from("Krakenhood Forever", "pong|1.2.0")
+    from("Krakenhood-Forever", "ping|1.2.0")
+    check(KF.messagingWorks == nil and #SENT == n, "our own echoed ping and pong are ignored")
+
+    -- with debug on, the raw sender is shown with the verdict
+    KF.db.settings.debug = true
+    local before = #CHAT
+    from("Thaliadin Forever", "H|1|1.2.0|" .. TAG)
+    from("Somebody Else", "H|1|1.2.0|" .. TAG)
+    KF.db.settings.debug = false
+    local sawAccepted, sawIgnored = false, false
+    for i = before + 1, #CHAT do
+        if CHAT[i]:find('from "Thaliadin Forever"', 1, true) and CHAT[i]:find("accepted", 1, true) then sawAccepted = true end
+        if CHAT[i]:find('from "Somebody Else"', 1, true) and CHAT[i]:find("ignored", 1, true) then sawIgnored = true end
+    end
+    check(sawAccepted and sawIgnored, "debug output names the sender and says accepted or ignored")
+    KF.db.settings.sync = false
+end
+
+section("sync: lists (a union, never a deletion)")
+do
+    local S = KF.Sync
+    local j = KF.journey
+    local pair = KF:CurrentPair()
+    KF.db.settings.sync = true
+    local TAG = j.partnerTag or "Thalia#1234"
+    local H = "Thaliadin Forever"
+    local function from(sender, text) FireEvent("CHAT_MSG_ADDON", "KRAKENFR", text, "PARTY", sender) end
+    local function L(kind, entries, sender)
+        from(sender or H, ("L|%s|Thaliadin-Forever|Krakenhood-Forever|%s"):format(kind, entries))
+    end
+    local function drain() for _ = 1, 80 do Advance(0.4) end end
+    local function sawChat(text)
+        for i = #CHAT, 1, -1 do if CHAT[i]:find(text, 1, true) then return true end end
+        return false
+    end
+    from(H, "H|1|1.2.0|" .. TAG)
+    local logBefore = #pair.log
+    local keepItem = pair.items[5191]
+
+    -- items: added when new, raised when known; his "me" is my "partner"
+    L("items", "424242,3,1,2,0,1790000300,1790000400,Test Blade")
+    local it = pair.items[424242]
+    check(it and it.n == "Test Blade" and it.q == 3 and it.c == 1, "an item only the friend's copy has is added")
+    check(it.me == 0 and it.pa == 2, "...with his 'me' count as my partner's")
+    L("items", "424242,3,5,1,3,1780000000,1790000500,Test Blade")
+    check(it.c == 5 and it.me == 3 and it.pa == 2, "a known item takes the larger counts (swapped), never lower")
+    check(it.t == 1780000000 and it.l == 1790000500, "...the earlier first date and the later last date")
+
+    -- rares, bosses, dungeons, zones, creatures, toughest foe
+    L("rares", "4242,2,1790000000,35,Test Rare")
+    local r = pair.rares[4242]
+    check(r and r.c == 2 and r.lv == 35 and r.n == "Test Rare", "a rare is added")
+    check(j.firsts["rare:4242"] ~= nil, "...and its journey 'first time' is marked as used")
+    check(#pair.log == logBefore, "...without writing a journal entry")
+    L("rares", "4242,5,1780000000,35,Test Rare")
+    check(r.c == 5 and r.t == 1780000000, "a known rare takes the larger count and the earlier date")
+    L("rares", "4242,1,1790000000,10,Test Rare")
+    check(r.c == 5 and r.lv == 35, "...and never lower")
+
+    L("bosses", "3,1790000000,Test Boss")
+    check(pair.bosses["Test Boss"] and pair.bosses["Test Boss"].c == 3 and j.firsts["boss:Test Boss"], "a boss is added")
+    L("dungeons", "36:heroic,2,3600,5,1790000000,The Deadmines (Heroic)")
+    local dun = pair.dungeons["36:heroic"]
+    check(dun and dun.runs == 2 and dun.time == 3600 and dun.bosses == 5 and dun.n == "The Deadmines (Heroic)", "a heroic dungeon is added under its own key")
+    L("dungeons", "36:heroic,1,100,9,1790000000,The Deadmines (Heroic)")
+    check(dun.runs == 2 and dun.time == 3600 and dun.bosses == 9, "...each number takes its larger value")
+    L("zones", "1790000000,Test Zone")
+    check(pair.zones["Test Zone"] == 1790000000 and j.firsts["zone:Test Zone"], "a zone is added")
+    L("mobs", "7777,50,12,beast,Test Wolf;8888,3,5,nonsense,Odd Thing")
+    check(pair.mobs[7777] and pair.mobs[7777].c == 50 and pair.mobs[7777].ty == "beast", "a creature is added with its type")
+    check(pair.mobs[8888] and pair.mobs[8888].ty == "unspecified", "...an unknown type becomes 'unspecified'")
+    L("toughest", "40,Big Boss")
+    check(pair.toughest and pair.toughest.lv == 40 and pair.toughest.n == "Big Boss", "the toughest foe is taken over")
+    L("toughest", "10,Small Fry")
+    check(pair.toughest.lv == 40, "...a weaker one doesn't replace it")
+    check(pair.items[5191] == keepItem, "nothing that was already there has been replaced or removed")
+
+    -- bad input is ignored without errors
+    L("items", ";;,,;x;1,2;66,3,99999999999,0,0,0,0,TooBig;67,9,1,0,0,0,0,BadQuality")
+    check(pair.items[66] == nil and pair.items[67] == nil, "malformed, absurd and out-of-range entries are ignored")
+    L("items", "555,3,1,0,0,0,0,Stranger Item", "Somebody Else")
+    check(pair.items[555] == nil, "a list from a stranger is ignored")
+    from(H, "L|weird|Thaliadin-Forever|Krakenhood-Forever|1,2,3")
+    from(H, "L|items|Thaliadin-Forever")
+    check(true, "an unknown list kind and a cut-off message do nothing")
+
+    -- what changed is reported
+    Advance(3)
+    check(sawChat("new items") and sawChat("new rares") and sawChat("new bosses"), "the new entries are reported in the sync line")
+
+    -- sending: lists go out once, and again only when they change
+    SENT = {}
+    SlashCmdList.KRAKENFRIENDS("sync")
+    drain()
+    local sawItems, big = false, false
+    for _, m in ipairs(SENT) do
+        if m.text:sub(1, 8) == "L|items|" and m.text:find("424242", 1, true) then sawItems = true end
+        if #m.text > 255 then big = true end
+    end
+    check(sawItems and not big, "/kf sync sends our lists, every message within 255 bytes")
+    local function count(prefix)
+        local n = 0
+        for _, m in ipairs(SENT) do if m.text:sub(1, #prefix) == prefix then n = n + 1 end end
+        return n
+    end
+    Advance(30)
+    SENT = {}
+    S:Push()
+    drain()
+    check(count("C|") > 0 and count("L|") == 0, "a later push sends the counters but not unchanged lists")
+    pair.items[999001] = { n = "Fresh Find", q = 3, c = 1, me = 1, pa = 0, t = 1790000000, l = 1790000999 }
+    Advance(30)
+    SENT = {}
+    S:Push()
+    drain()
+    check(count("L|items|") > 0 and count("L|rares|") == 0, "a changed list is sent again, the others are not")
+    Advance(100)
+    SENT = {}
+    from(H, "H|1|1.2.0|" .. TAG)
+    drain()
+    check(count("L|items|") > 0 and count("L|rares|") > 0, "when the friend says hello again, everything is sent again")
+    pair.items[999001] = nil
+
+    -- names are cleaned and big lists are capped
+    local weird = KF.NewPair("A-Forever", "MAGE", "B-Forever", "PRIEST")
+    weird.items[1] = { n = "A;B,C|D=E", q = 3, c = 1, me = 1, pa = 0, t = 1, l = 1 }
+    local cleaned = false
+    for _, m in ipairs(S.Messages(weird)) do if m:find("A B C D E", 1, true) then cleaned = true end end
+    check(cleaned, "separator characters in names are replaced before sending")
+    local bigPair = KF.NewPair("A-Forever", "MAGE", "B-Forever", "PRIEST")
+    for i = 1, 500 do
+        bigPair.mobs[i] = { n = "Creature " .. i, c = i, lv = 10, ty = "beast" }
+        bigPair.items[i] = { n = "Item " .. i, q = 3, c = 1, me = 1, pa = 0, t = i, l = i }
+    end
+    local items, mobs, fits = 0, 0, true
+    for _, m in ipairs(S.Messages(bigPair)) do
+        if #m > 255 then fits = false end
+        local kind, entries = m:match("^L|(%a+)|[^|]*|[^|]*|(.*)$")
+        if kind then
+            local n = select(2, entries:gsub(";", ";")) + 1
+            if kind == "items" then items = items + n elseif kind == "mobs" then mobs = mobs + n end
+        end
+    end
+    check(fits and items == 200 and mobs == 80, "very long lists are capped (200 items, 80 creatures), every message within 255 bytes")
+    KF.db.settings.sync = false
+end
+
+section("sync: backup and /kf restore")
+do
+    local S = KF.Sync
+    local id = KF.journey.id
+    KF.db.settings.sync = true
+    KF.db.backup = nil
+    local TAG = KF.journey.partnerTag or "Thalia#1234"
+    local H = "Thaliadin Forever"
+    local function from(sender, text) FireEvent("CHAT_MSG_ADDON", "KRAKENFRIENDS" and "KRAKENFR", text, "PARTY", sender) end
+    local function chapter() return KF:CurrentPair() end
+    local function chatHas(text)
+        for i = #CHAT, 1, -1 do if CHAT[i]:find(text, 1, true) then return true end end
+        return false
+    end
+    local function oldChapter(b)
+        local me, partner = chapter().me, chapter().partner
+        for _, p in pairs(b.data.pairs) do if p.me == me and p.partner == partner then return p end end
+    end
+
+    -- a batch that changes something leaves a backup of the state just before it
+    local q = chapter().stats.quests
+    local totalQ = KF.journey.total.quests
+    from(H, "H|1|1.2.0|" .. TAG)
+    from(H, "C|Thaliadin-Forever|Krakenhood-Forever|WARRIOR|MAGE|q=" .. (q + 40))
+    check(chapter().stats.quests == q + 40, "the sync raised the quest count")
+    check(KF.db.backup == nil, "the backup is only kept once the batch is over")
+    Advance(100)
+    local b1 = KF.db.backup
+    check(b1 and b1.id == id and b1.t, "a backup exists after a batch that changed something")
+    check(oldChapter(b1) and oldChapter(b1).stats.quests == q and b1.data.total.quests == totalQ, "...and holds the state from before that batch")
+
+    -- a batch that changes nothing does not replace it
+    from(H, "H|1|1.2.0|" .. TAG)
+    from(H, "C|Thaliadin-Forever|Krakenhood-Forever|WARRIOR|MAGE|q=" .. (q + 40))
+    Advance(100)
+    check(KF.db.backup == b1, "a batch that changed nothing leaves the backup alone")
+
+    -- the next batch that matters replaces it, with the state just before itself
+    from(H, "H|1|1.2.0|" .. TAG)
+    from(H, "C|Thaliadin-Forever|Krakenhood-Forever|WARRIOR|MAGE|q=" .. (q + 60))
+    Advance(100)
+    local b2 = KF.db.backup
+    check(b2 ~= b1 and oldChapter(b2).stats.quests == q + 40, "the next changing batch replaces it: the backup never reaches further back than that batch")
+
+    -- /kf status mentions it
+    SlashCmdList.KRAKENFRIENDS("status")
+    check(chatHas("backup for /kf restore"), "/kf status mentions the backup")
+
+    -- restoring asks first, then puts the journey back and keeps tracking
+    local popups = #POPUPS
+    SlashCmdList.KRAKENFRIENDS("restore")
+    check(#POPUPS == popups + 1 and POPUPS[#POPUPS].which == "KRAKENFRIENDS_RESTORE", "/kf restore asks for confirmation")
+    check(chapter().stats.quests == q + 60, "...and changes nothing before the answer")
+    StaticPopupDialogs.KRAKENFRIENDS_RESTORE.OnAccept()
+    check(chapter().stats.quests == q + 40, "accepting puts the journey back to the state before the last sync")
+    check(KF.partner and KF.partner.journey == KF.db.journeys[id] and KF.journey == KF.db.journeys[id], "the partner and the window use the restored journey")
+    local kills = KF.journey.total.kills
+    FireEvent("PARTY_KILL", "Player-1-0000AAAA", "Creature-0-1-0-1-9999-00000999")
+    check(KF.journey.total.kills == kills + 1, "tracking carries on in the restored journey")
+
+    -- without a backup there is nothing to restore
+    KF.db.backup = nil
+    local n = #POPUPS
+    SlashCmdList.KRAKENFRIENDS("restore")
+    check(#POPUPS == n and chatHas("no backup yet"), "/kf restore without a backup only explains")
+
+    -- a message that fails is skipped and reported; the rest of the sync carries on
+    local realOnList = S.OnList
+    S.OnList = function() error("boom") end
+    ERRORS = {}
+    from(H, "H|1|1.2.0|" .. TAG)
+    from(H, "L|items|Thaliadin-Forever|Krakenhood-Forever|1,3,1,0,0,0,0,Whatever")
+    check(#ERRORS == 1, "a failing message is reported once")
+    ERRORS = {}
+    S.OnList = realOnList
+    local q3 = chapter().stats.quests
+    from(H, "C|Thaliadin-Forever|Krakenhood-Forever|WARRIOR|MAGE|q=" .. (q3 + 1))
+    check(chapter().stats.quests == q3 + 1, "...and later messages still get through")
+    KF.db.settings.sync = false
+end
+
+section("sync: round trip through the encoder and decoder")
+do
+    local S = KF.Sync
+    KF.db.settings.sync = true
+    local TAG = KF.journey.partnerTag or "Thalia#1234"
+    local H = "Thaliadin Forever"
+    local function from(text) FireEvent("CHAT_MSG_ADDON", "KRAKENFR", text, "PARTY", H) end
+
+    -- a chapter full of distinctive numbers, as the FRIEND's copy would hold it
+    local src = KF.NewPair("Alpha-Forever", "MAGE", "Beta-Forever", "PRIEST")
+    local s = src.stats
+    s.kills, s.elite, s.rare, s.boss, s.quests, s.runs, s.time, s.goldDuo = 111, 12, 3, 4, 55, 6, 7777, 88888
+    s.kbMe, s.kbPartner, s.deathsMe, s.deathsPartner, s.levelsMe, s.levelsPartner = 21, 22, 3, 4, 5, 6
+    for q = 0, 5 do s.lootMe[q] = 7 + q; s.lootPartner[q] = 17 + q end
+    s.types = { beast = 30, humanoid = 40, undead = 5 }
+    src.rares[522] = { n = "Mor Ladim", c = 2, t = 1790000100, lv = 30 }
+    src.bosses["Boss One"] = { c = 3, t = 1790000200 }
+    src.dungeons[36] = { n = "The Deadmines", runs = 2, time = 900, bosses = 5, last = 1790000300 }
+    src.dungeons["36:heroic"] = { n = "The Deadmines (Heroic)", runs = 1, time = 500, bosses = 3, last = 1790000350 }
+    src.zones["Zone One"] = 1790000400
+    src.mobs[116] = { n = "Defias Bandit", c = 60, ty = "humanoid", lv = 14 }
+    src.items[2244] = { n = "Krol Blade", q = 4, c = 2, me = 5, pa = 2, t = 1790000500, l = 1790000600 }
+    src.toughest = { n = "Edwin VanCleef", lv = 22 }
+    src.records.duo.crit = { n = 999, s = "Fire", d = "Pack Wolf", t = 1790000700 }
+    src.records.duo.hit = { n = 999, s = "Fire", d = "Pack Wolf", t = 1790000700 }
+
+    local backup = { id = KF.journey.id, data = KF.DeepCopy(KF.journey) }
+    local msgs = S.Messages(src)
+    local fits = true
+    for _, m in ipairs(msgs) do if #m > 255 then fits = false end end
+    check(#msgs >= 8 and fits, "the chapter is encoded into several messages that fit")
+
+    from("H|1|1.2.0|" .. TAG)
+    for _, m in ipairs(msgs) do from(m) end
+    local got = KF.journey.pairs["Beta-Forever & Alpha-Forever"]
+    check(got ~= nil, "the chapter arrives under the receiver's name for the pair")
+    local g = got.stats
+    check(g.kills == 111 and g.elite == 12 and g.rare == 3 and g.boss == 4 and g.quests == 55 and g.runs == 6 and g.time == 7777 and g.goldDuo == 88888, "shared counters arrive unchanged")
+    check(g.kbMe == 22 and g.kbPartner == 21 and g.deathsMe == 4 and g.deathsPartner == 3 and g.levelsMe == 6 and g.levelsPartner == 5, "'me' and 'partner' counters arrive swapped")
+    local lootOk = true
+    for q = 0, 5 do
+        if g.lootPartner[q] ~= 7 + q or g.lootMe[q] ~= 17 + q then lootOk = false end
+    end
+    check(lootOk, "loot counts by quality arrive swapped")
+    check(g.types.beast == 30 and g.types.humanoid == 40 and g.types.undead == 5, "kills by creature type arrive unchanged")
+    check(got.rares[522] and got.rares[522].c == 2 and got.rares[522].lv == 30 and got.rares[522].n == "Mor Ladim" and got.rares[522].t == 1790000100, "a rare arrives complete")
+    check(got.bosses["Boss One"] and got.bosses["Boss One"].c == 3 and got.bosses["Boss One"].t == 1790000200, "a boss arrives complete")
+    check(got.dungeons[36] and got.dungeons[36].runs == 2 and got.dungeons[36].time == 900 and got.dungeons[36].bosses == 5 and got.dungeons[36].last == 1790000300, "a dungeon arrives complete")
+    check(got.dungeons["36:heroic"] and got.dungeons["36:heroic"].runs == 1 and got.dungeons["36:heroic"].n == "The Deadmines (Heroic)", "a heroic dungeon keeps its own key")
+    check(got.zones["Zone One"] == 1790000400, "a zone arrives with its date")
+    check(got.mobs[116] and got.mobs[116].c == 60 and got.mobs[116].ty == "humanoid" and got.mobs[116].lv == 14 and got.mobs[116].n == "Defias Bandit", "a creature arrives complete")
+    local it = got.items[2244]
+    check(it and it.q == 4 and it.c == 2 and it.me == 2 and it.pa == 5 and it.n == "Krol Blade" and it.t == 1790000500 and it.l == 1790000600, "an item arrives complete, its 'me' and 'partner' swapped")
+    check(got.toughest and got.toughest.lv == 22 and got.toughest.n == "Edwin VanCleef", "the toughest foe arrives")
+    check(got.records.duo.crit and got.records.duo.crit.n == 999 and got.records.duo.crit.s == "Fire" and got.records.duo.crit.d == "Pack Wolf", "the shared record arrives")
+
+    -- and sending it again changes nothing
+    local before = KF.DeepCopy(got)
+    from("H|1|1.2.0|" .. TAG)
+    for _, m in ipairs(msgs) do from(m) end
+    local same = true
+    local function compare(a, b)
+        for k, v in pairs(a) do
+            if type(v) == "table" then if type(b[k]) ~= "table" or not compare(v, b[k]) then return false end
+            elseif b[k] ~= v then return false end
+        end
+        return true
+    end
+    check(compare(before, got) and compare(got, before), "applying the same messages again changes nothing")
+
+    -- put the journey back as it was, so the later tests are unaffected
+    KF.db.backup = backup
+    KF:RestoreBackup()
+    KF.db.backup = nil
+    KF.db.settings.sync = false
+end
+
 section("save + restore (beta safety net)")
 FireEvent("PLAYER_LOGOUT")
-check(KrakenfriendsDB.savedAt == NOW and KrakenfriendsCharDB == KrakenfriendsDB, "saved to both globals")
+check(KrakenfriendsDB.savedAt == math.floor(NOW) and KrakenfriendsCharDB == KrakenfriendsDB, "saved to both globals")
 local snapshot = KrakenfriendsDB
 KrakenfriendsDB, KrakenfriendsCharDB, KrakenfriendsRestore = nil, nil, snapshot
 KF:LoadDB()
-check(KF.dbSource == "restore" and KF.db.journeys["Thalia#1234"].total.kills == s.kills, "restore file picked up")
+check(KF.dbSource == "restore" and KF.db.journeys["Thalia#1234"].total.kills == snapshot.journeys["Thalia#1234"].total.kills, "restore file picked up")
 local older = CopyTable(snapshot); older.savedAt = 1
 KrakenfriendsDB, KrakenfriendsCharDB, KrakenfriendsRestore = snapshot, nil, older
 KF:LoadDB()

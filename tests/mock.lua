@@ -9,10 +9,10 @@ local function noop() end
 -- clock ------------------------------------------------------------------
 NOW = 1790000000
 GT = 1000.0
-function time(t) if t then return os.time(t) end return NOW end
+function time(t) if t then return os.time(t) end return math.floor(NOW) end
 function GetTime() return GT end
-function GetServerTime() return NOW end
-function date(fmt, t) return os.date(fmt, t or NOW) end
+function GetServerTime() return math.floor(NOW) end
+function date(fmt, t) return os.date(fmt, math.floor(t or NOW)) end
 
 -- timers -------------------------------------------------------------------
 TIMERS, TICKERS = {}, {}
@@ -226,10 +226,13 @@ C_Item = {
 }
 C_Texture = { GetAtlasInfo = function(a) if a:find("^classicon") then return nil end return { width = 1 } end }
 SENT = {}
-Enum = { SendAddonMessageResult = { Success = 0, AddonMessageThrottle = 3, GeneralError = 9 } }
+Enum = { SendAddonMessageResult = { Success = 0, AddonMessageThrottle = 3, ChannelThrottle = 10, GeneralError = 9 } }
 C_ChatInfo = {
     RegisterAddonMessagePrefix = function(p) PREFIXES = PREFIXES or {}; PREFIXES[p] = true; return 0 end,
-    SendAddonMessage = function(prefix, text, chan) SENT[#SENT + 1] = { prefix = prefix, text = text, chan = chan }; return 0 end,
+    SendAddonMessage = function(prefix, text, chan)
+        SENT[#SENT + 1] = { prefix = prefix, text = text, chan = chan }
+        return table.remove(SEND_RESULTS or {}, 1) or 0
+    end,
     AreOutgoingAddonChatMessagesRestricted = function() return true end,
 }
 C_Spell = {

@@ -24,6 +24,79 @@ local function clean(v)
 end
 KF.clean = clean
 
+function KF.DeepCopy(v)
+    if type(v) ~= "table" then return v end
+    local c = {}
+    for k, x in pairs(v) do c[k] = KF.DeepCopy(x) end
+    return c
+end
+
+-- Every date the addon stores comes from the game's server clock, which you and your
+-- friend share. A PC clock can be off by seconds or more, which would blur "first seen"
+-- when two journals are merged.
+function KF.Now()
+    local t = GetServerTime and GetServerTime()
+    if type(t) ~= "number" then t = time() end
+    return math.floor(t)
+end
+
+-- Character names come in several spellings: Forever's two-word names arrive as
+-- "Naendor Delorentis" in a message, but the name API gives "Naendor" and
+-- "Delorentis" separately and we keep "Naendor-Delorentis". Compare them with the
+-- spaces, hyphens and capitals taken out.
+function KF.NormName(s)
+    return (tostring(s or ""):lower():gsub("[%s%-]+", ""))
+end
+
+-- Is `sender` (as a message names it) this character? `who` has a .key and a .name.
+function KF.IsSender(sender, who)
+    local n = KF.NormName(sender)
+    return n ~= "" and who ~= nil and (n == KF.NormName(who.key) or n == KF.NormName(who.name))
+end
+
+-- Names on screen: the first name ("Miss"), and when two of the characters we know
+-- share a first name, the first name plus the initial of the surname ("Miss H." and
+-- "Miss Z."). The full two-word name is shown in tooltips. Saved keys never change.
+local sharedFirstNames = {}
+
+function KF:RebuildNames()
+    local seen = {} -- normalised first name -> { normalised full key = true }
+    local function add(key)
+        if type(key) ~= "string" or key == "" then return end
+        local first = KF.NormName(key:match("^[^%-]+") or key)
+        seen[first] = seen[first] or {}
+        seen[first][KF.NormName(key)] = true
+    end
+    if self.me then add(self.me.key) end
+    if self.partner then add(self.partner.key) end
+    for _, j in pairs(self.db and self.db.journeys or {}) do
+        for key in pairs(j.chars.me) do add(key) end
+        for key in pairs(j.chars.partner) do add(key) end
+        for _, pair in pairs(j.pairs) do add(pair.me); add(pair.partner) end
+    end
+    sharedFirstNames = {}
+    for first, set in pairs(seen) do
+        local n = 0
+        for _ in pairs(set) do n = n + 1 end
+        sharedFirstNames[first] = n > 1
+    end
+end
+
+function KF.DisplayName(key)
+    if type(key) ~= "string" or key == "" then return "?" end
+    local first, rest = key:match("^([^%-]+)%-?(.*)$")
+    if not first then return key end
+    if rest ~= "" and sharedFirstNames[KF.NormName(first)] then
+        return first .. " " .. rest:sub(1, 1):upper() .. "."
+    end
+    return first
+end
+
+function KF.FullName(key)
+    if type(key) ~= "string" or key == "" then return "?" end
+    return (key:gsub("%-", " "))
+end
+
 function KF.call(fn, ...)
     if not fn then return nil end
     local ok, a, b, c, d = pcall(fn, ...)
@@ -208,12 +281,12 @@ local function upgradeJourney(j)
 end
 
 function KF.NewPair(me, meClass, partner, partnerClass)
-    local now = time()
+    local now = KF.Now()
     return fill({ me = me, meClass = meClass, partner = partner, partnerClass = partnerClass, started = now, last = now }, PAIR_TEMPLATE)
 end
 
 function KF:NewJourney(id, partnerName, partnerTag)
-    local now = time()
+    local now = KF.Now()
     local j = upgradeJourney({
         id = id, partnerName = partnerName, partnerTag = partnerTag,
         started = now, lastActive = now,
@@ -241,9 +314,9 @@ function KF:Add(field, amount, sub)
     local pair = self:CurrentPair()
     if pair then
         bump(pair.stats, field, amount, sub)
-        pair.last = time()
+        pair.last = KF.Now()
     end
-    j.lastActive = time()
+    j.lastActive = KF.Now()
 end
 
 -- Journal entries belong to the chapter they happened in.
@@ -251,7 +324,7 @@ function KF:Log(kind, text)
     local pair = self:CurrentPair()
     if not pair or not text then return end
     local log = pair.log
-    log[#log + 1] = { t = time(), k = kind, x = text }
+    log[#log + 1] = { t = KF.Now(), k = kind, x = text }
     while #log > LOG_CAP do table.remove(log, 1) end
     self:Fire("UPDATE")
 end
@@ -262,7 +335,18 @@ function KF:First(kind, key)
     local j = self.journey
     local id = kind .. ":" .. tostring(key)
     if not j or j.firsts[id] then return false end
-    j.firsts[id] = time()
+    j.firsts[id] = KF.Now()
+    return true
+end
+
+-- One backup of a journey, taken by the sync just before it changes anything and kept
+-- until the next sync that changes something replaces it. /kf restore puts it back.
+function KF:RestoreBackup()
+    local b = self.db.backup
+    if not (b and type(b.data) == "table" and b.id) then return false end
+    self.db.journeys[b.id] = KF.DeepCopy(b.data)
+    self:ScanGroup() -- binds the partner to the restored journey
+    self:RefreshJourney()
     return true
 end
 
@@ -276,13 +360,13 @@ function KF:SubmitHit(who, amount, crit, spell, target)
     local recs = pair.records
     recs[who] = recs[who] or {}
     local p = self.partner
-    local char = (who == "me" and self.me.name) or (who == "partner" and p and p.name) or nil -- "duo" belongs to nobody in particular
+    local char = (who == "me" and KF.DisplayName(self.me.key)) or (who == "partner" and p and KF.DisplayName(p.key)) or nil -- "duo" belongs to nobody in particular
     local changed
 
     for _, kind in ipairs(crit and { "hit", "crit" } or { "hit" }) do
         local old = recs[who][kind]
         if not old or amount > old.n then
-            recs[who][kind] = { n = amount, s = spell, d = target, t = time(), ch = char }
+            recs[who][kind] = { n = amount, s = spell, d = target, t = KF.Now(), ch = char }
             changed = true
             -- announce clear improvements of a crit record, at most once a minute per player
             if kind == "crit" and old and old.n >= 20 and amount >= old.n * 1.2 then
@@ -333,7 +417,7 @@ end
 --------------------------------------------------------------------------------
 
 local DEFAULTS = {
-    settings = { debug = false, toasts = true, guessRecords = false, minimap = { angle = 205, hide = false }, window = {} },
+    settings = { debug = false, toasts = true, guessRecords = false, sync = true, minimap = { angle = 205, hide = false }, window = {} },
     journeys = {},
     ignored = {},
 }
@@ -351,10 +435,10 @@ function KF:LoadDB()
             if not db or (t.savedAt or 0) > (db.savedAt or 0) then db, source = t, c[2] end
         end
     end
-    if not db then db, source = { created = time() }, "new" end
+    if not db then db, source = { created = KF.Now() }, "new" end
 
     fill(db, DEFAULTS)
-    db.created = db.created or time()
+    db.created = db.created or KF.Now()
     db.version = DB_VERSION
     for _, j in pairs(db.journeys) do upgradeJourney(j) end
 
@@ -379,7 +463,7 @@ function KF:ToggleDemo()
         return
     end
 
-    local now, day = time(), 86400
+    local now, day = KF.Now(), 86400
     local j = self:NewJourney(DEMO_ID, "Thalia", "Thalia#1234")
     j.started = now - day * 11
     local me, alt, friend = self.me.key, "Krakenalt-Demo", "Thalianne-Demo"
@@ -493,6 +577,20 @@ if StaticPopupDialogs then
     }
 end
 
+if StaticPopupDialogs then
+    StaticPopupDialogs.KRAKENFRIENDS_RESTORE = {
+        text = "Put your journey with %s back to how it was before the sync at %s?\n\nEverything counted since then is lost. A sync can bring numbers back in; /kf sync off stops that.",
+        button1 = YES or "Yes",
+        button2 = NO or "No",
+        OnAccept = function()
+            if KF:RestoreBackup() then
+                KF:Print("journey restored. If syncing keeps bringing in numbers you don't want, switch it off with /kf sync off.")
+            end
+        end,
+        timeout = 0, whileDead = true, hideOnEscape = true, showAlert = true, preferredIndex = 3,
+    }
+end
+
 function KF:ResetJourney(id)
     local old = id and self.db.journeys[id]
     if not old then return end
@@ -510,7 +608,9 @@ local HELP = {
     "|cff4fd1c5/kf minimap|r: show or hide the minimap button",
     "|cff4fd1c5/kf toasts|r: turn milestone pop-ups on or off",
     "|cff4fd1c5/kf reset|r: reset the journey shown in the window",
-    "|cff4fd1c5/kf records|r: experimental hit and crit records on or off (|cff4fd1c5/kf records reset|r clears them)",
+    "|cff4fd1c5/kf records|r: experimental hit and crit records on or off, off by default (|cff4fd1c5/kf records reset|r clears them)",
+    "|cff4fd1c5/kf sync|r: send your journey to your friend now (|cff4fd1c5/kf sync off|r and |cff4fd1c5on|r switch automatic syncing)",
+    "|cff4fd1c5/kf restore|r: undo the last sync (puts your journey back to how it was just before it changed anything)",
     "|cff4fd1c5/kf ping|r: test whether the addon can message your friend's copy (both need this version)",
     "|cff4fd1c5/kf debug|r: print tracking details to chat",
 }
@@ -536,6 +636,15 @@ function KF:Slash(input)
         self:Print("Milestone pop-ups " .. (settings.toasts and "on." or "off."))
     elseif cmd == "ping" then
         self:Ping()
+    elseif cmd == "sync" then
+        self.Sync:Command(rest)
+    elseif cmd == "restore" then
+        local b = self.db.backup
+        if not (b and type(b.data) == "table") then
+            self:Print("There is no backup yet. One is taken automatically when a sync is about to change your journey.")
+        elseif StaticPopup_Show then
+            StaticPopup_Show("KRAKENFRIENDS_RESTORE", b.partner or "your friend", date("%d %b %H:%M", b.t or KF.Now()))
+        end
     elseif cmd == "records" then
         if rest:lower() == "reset" then
             local j = self.UI:ViewedJourney()
@@ -547,7 +656,7 @@ function KF:Slash(input)
             settings.guessRecords = not settings.guessRecords
             self:Fire("UPDATE") -- redraw an open window right away
             self:Print("Experimental hit and crit records " .. (settings.guessRecords and "on." or "off.")
-                .. (settings.guessRecords and " The game doesn't say who dealt a hit, so with two players attacking the same creature a hit can be credited to the wrong player." or ""))
+                .. (settings.guessRecords and " The game doesn't say who dealt a hit, so a hit can be credited to the wrong player or to a stranger." or ""))
         end
     elseif cmd == "debug" then
         settings.debug = not settings.debug
@@ -571,6 +680,7 @@ end
 --------------------------------------------------------------------------------
 
 local MSG_PREFIX = "KRAKENFR"
+KF.msgPrefix = MSG_PREFIX
 local pendingPing
 
 local function enumName(enum, value)
@@ -586,6 +696,8 @@ local function groupChannel()
     if IsInRaid() then return "RAID" end
     if IsInGroup() then return "PARTY" end
 end
+
+KF.groupChannel = groupChannel
 
 function KF:Ping()
     if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then
@@ -614,7 +726,7 @@ end
 KF:On("CHAT_MSG_ADDON", function(prefix, text, channel, sender)
     prefix, text, channel, sender = clean(prefix), clean(text), clean(channel), clean(sender)
     if prefix ~= MSG_PREFIX or type(text) ~= "string" or type(sender) ~= "string" or not KF.me then return end
-    if sender:match("^([^%-]+)") == KF.me.name then return end -- our own message echoed back
+    if KF.IsSender(sender, KF.me) then return end -- our own message echoed back
     local kind, version = strsplit("|", text)
     if kind == "ping" then
         KF:Printf("%s pinged you (Krakenfriends %s). Replying...", sender, version or "?")
@@ -653,13 +765,13 @@ KF:On("PLAYER_LOGIN", function()
     KF:Fire("LOGIN")
     if KF.dbSource == "restore" or KF.dbSource == "character" then
         KF:Printf("restored your journeys from the %s backup (saved %s).", KF.dbSource,
-            date("%d %b %H:%M", KF.db.savedAt or time()))
+            date("%d %b %H:%M", KF.db.savedAt or KF.Now()))
     end
 end)
 
 KF:On("PLAYER_LOGOUT", function()
     if not KF.db then return end
     KF:Fire("LOGOUT")
-    KF.db.savedAt = time()
+    KF.db.savedAt = KF.Now()
     KrakenfriendsDB, KrakenfriendsCharDB = KF.db, KF.db
 end)
