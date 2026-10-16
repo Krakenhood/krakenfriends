@@ -10,6 +10,36 @@ KF.Theme = {
     text    = { 0.93, 0.94, 0.96 },
     dim     = { 0.56, 0.60, 0.66 },
     good    = { 0.36, 0.86, 0.47 },
+    ring    = { 0.047, 0.055, 0.071, 1 }, -- solid colour that cuts one icon out of another
+}
+
+-- The two looks. The Theme above is overwritten with one of them when the saved data
+-- is loaded, before any frame is built ("classic" is the default).
+KF.Palettes = {
+    -- the original teal look
+    classic = {
+        bg      = { 0.047, 0.055, 0.071, 0.96 },
+        panel   = { 1, 1, 1, 0.035 },
+        hover   = { 1, 1, 1, 0.07 },
+        line    = { 1, 1, 1, 0.08 },
+        accent  = { 0.31, 0.82, 0.77 },
+        accent2 = { 0.55, 0.42, 0.95 },
+        text    = { 0.93, 0.94, 0.96 },
+        dim     = { 0.56, 0.60, 0.66 },
+        ring    = { 0.047, 0.055, 0.071, 1 },
+    },
+    -- the game's own look: gold border, dark stone, the game's gold and red
+    wow = {
+        bg      = { 0, 0, 0, 0 },          -- the backdrop draws the background
+        panel   = { 0, 0, 0, 0.30 },
+        hover   = { 1, 0.82, 0, 0.10 },
+        line    = { 1, 0.82, 0, 0.22 },
+        accent  = { 1, 0.82, 0 },
+        accent2 = { 0.70, 0.08, 0.06 },
+        text    = { 1, 1, 1 },
+        dim     = { 0.78, 0.72, 0.60 },
+        ring    = { 0.13, 0.11, 0.09, 1 },
+    },
 }
 
 --------------------------------------------------------------------------------

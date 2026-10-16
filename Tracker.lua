@@ -236,17 +236,20 @@ end
 --
 -- There is no combat log here, and UNIT_COMBAT reports the damage a unit took
 -- (the amount, a CRITICAL flag and the damage school) without saying who dealt
--- it. Two kinds of record come out of that:
+-- it, and it covers anyone hitting a creature, a passing stranger included.
 --
---  * "together": the biggest hit and crit on any creature one of you is
---    fighting, credited to the duo, and only while the group is exactly the
---    two of you. Pets, strangers helping out and damage-over-time ticks on that
---    creature can still be in it.
---  * "you" and "friend": a best guess of who dealt a hit, from "cast a spell a
---    moment ago, with that creature targeted, in a school that fits".
---    EXPERIMENTAL and off by default (/kf records): this client can't see the
---    friend's casts, and two players of the same school hitting at the same
---    moment can't be told apart, so a hit can be credited to the wrong player.
+-- So a hit is recorded only when one of the two of you CLAIMS it: you cast a spell a
+-- moment ago, have that creature targeted, and the spell's damage school fits the
+-- hit. A hit that fits neither player's casts (a stranger's, a pet's, a
+-- damage-over-time tick of another school) is never recorded. Each copy only sees
+-- its own player's casts, so each records its own player's hits; the sync then
+-- hands them to the friend's copy for the other column. The shared column is simply
+-- the better of the two.
+--
+-- EXPERIMENTAL; on by default, /kf records switches it off. It can still go wrong when two
+-- players of the same school hit at the same moment, or a stranger's hit has the
+-- school of a spell you just cast. Only counted while the group is exactly the two of
+-- you.
 --------------------------------------------------------------------------------
 
 KF.recordsAreGuesses = true -- the UI says so on the Records block
@@ -257,16 +260,6 @@ local seenHits = {} -- "guid:amount" -> time, to drop the copy each unit token d
 
 local SCHOOLS = 7 -- physical, holy, fire, nature, frost, shadow, arcane (masks 1, 2, 4, ... 64)
 
-local function schoolName(mask)
-    if type(mask) ~= "number" then return nil end
-    local names = {}
-    for i = 0, SCHOOLS - 1 do
-        local v = 2 ^ i
-        if mask % (2 * v) >= v then names[#names + 1] = _G["SPELL_SCHOOL" .. i .. "_NAME"] or tostring(v) end
-    end
-    return #names > 0 and table.concat(names, "/") or nil
-end
-
 local function sharesSchool(a, b)
     for i = 0, SCHOOLS - 1 do
         local v = 2 ^ i
@@ -276,8 +269,10 @@ local function sharesSchool(a, b)
 end
 
 -- The game doesn't list a spell's school, but its description names it
--- ("... Fire damage"). A spell that names none is left unmatched, not rejected.
-local spellSchools = {} -- spellID -> mask, or false
+-- ("... Fire damage"). A description that names none is a physical ability (or deals no
+-- damage at all). Only when no description can be read is the school left unknown,
+-- and an unknown school fits any hit.
+local spellSchools = {} -- spellID -> mask, or false when unknown
 
 local function spellSchool(spellID)
     local cached = spellSchools[spellID]
@@ -291,6 +286,7 @@ local function spellSchool(spellID)
             local name = _G["SPELL_SCHOOL" .. i .. "_NAME"]
             if name and text:find(name:lower(), 1, true) then mask = (mask or 0) + 2 ^ i end
         end
+        mask = mask or 1 -- no school named: physical
     end
     spellSchools[spellID] = mask or false
     return mask
@@ -318,11 +314,11 @@ local function targeting(who, unit)
 end
 
 function T:OnUnitCombat(unit, event, flagText, amount, school)
-    -- Off unless switched on with /kf records. The game doesn't say who dealt a hit and
-    -- the damage numbers cover anyone hitting a creature, so on Forever this can't be
-    -- made reliable: both the shared record and the per-player guesses are experimental.
+    -- switched off with /kf records
     if not KF.db.settings.guessRecords then return end
     if not (KF.partner and KF.together) then return end
+    -- only while the group is exactly the two of you: other players' hits would be in it
+    if IsInRaid() or GetNumGroupMembers() ~= 2 then return end
     unit, event, flagText, amount, school = clean(unit), clean(event), clean(flagText), clean(amount), clean(school)
     if type(unit) ~= "string" or event ~= "WOUND" or type(amount) ~= "number" or amount <= 0 then return end
     if not call(UnitCanAttack, "player", unit) then return end -- only damage dealt to enemies
@@ -335,17 +331,7 @@ function T:OnUnitCombat(unit, event, flagText, amount, school)
     local crit = flagText == "CRITICAL"
     local target = call(UnitName, unit)
 
-    -- together: any hit on a creature one of you is fighting. The game says nothing
-    -- about who dealt a hit, so this only counts while it is just the two of you in the
-    -- group; in a 5-man the other players would be in it too.
-    local info = self:ScanUnit(unit)
-    if info and info.engaged and not IsInRaid() and GetNumGroupMembers() == 2 then
-        KF:Debug("hit %s%s (school %s) on %s: counted for together", amount, crit and " CRIT" or "", school or "?", target or unit)
-        KF:SubmitHit("duo", amount, crit, schoolName(school), target)
-    end
-
-    -- you / friend: only when switched on, and only when exactly one player fits
-    if not KF.db.settings.guessRecords then return end
+    -- who claims it: a recent cast, that creature targeted, and a school that fits
     local candidates = {}
     for _, who in ipairs({ "me", "partner" }) do
         local cast = casts[who]
@@ -355,7 +341,8 @@ function T:OnUnitCombat(unit, event, flagText, amount, school)
         end
     end
     if #candidates ~= 1 then
-        KF:Debug("hit %s on %s [%s, school %s]: %s", amount, target or unit, flagText or "", school or "?", #candidates == 0 and "no matching cast, skipped" or "ambiguous, skipped")
+        KF:Debug("hit %s on %s [%s, school %s]: %s", amount, target or unit, flagText or "", school or "?",
+            #candidates == 0 and "nobody claims it, not recorded" or "both would claim it, not recorded")
         return
     end
     local who = candidates[1]

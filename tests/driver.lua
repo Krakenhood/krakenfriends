@@ -269,15 +269,17 @@ UI.scope = nil
 
 section("records (hit and crit)")
 local pairNow = KF:CurrentPair()
--- off by default: a perfectly matching cast and target must NOT record anything
-check(KF.db.settings.guessRecords == false, "experimental records are off by default")
+-- on by default; switched off, a perfectly matching cast and target must NOT record anything
+check(KF.db.settings.guessRecords == true and KF.db.settings.recordsMigrated == true, "the records are on by default")
+SlashCmdList.KRAKENFRIENDS("records")
+check(KF.db.settings.guessRecords == false, "/kf records switches them off")
 UNITS.target = { guid = "Creature-0-1-0-1-3000-00000300", name = "Training Dummy", hostile = true, ctype = 7, level = 10 }
 FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-0", 133)
 FireEvent("UNIT_COMBAT", "target", "WOUND", "CRITICAL", 4242, 4)
-check(pairNow.records.me.crit == nil, "nothing is recorded while the experimental setting is off")
+check(pairNow.records.me.crit == nil, "nothing is recorded while they are switched off")
 -- switch it on with the slash command
 SlashCmdList.KRAKENFRIENDS("records")
-check(KF.db.settings.guessRecords == true, "/kf records switches it on")
+check(KF.db.settings.guessRecords == true, "/kf records switches them on again")
 Advance(2)
 UNITS.target = { guid = "Creature-0-1-0-1-3000-00000300", name = "Training Dummy", hostile = true, ctype = 7, level = 10 }
 UNITS.nameplate5 = { guid = "Creature-0-1-0-1-3001-00000301", name = "Other Dummy", hostile = true, ctype = 7, level = 10 }
@@ -370,17 +372,18 @@ SlashCmdList.KRAKENFRIENDS("records")
 check(ovText:find("RECORDS") and ovText:find("Biggest crit") and ovText:find("3,600"), "Records block on the Overview")
 print("  [records] " .. ovText:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):match("RECORDS.-TRIVIA") or "?")
 
-section("records: together (shared) and school matching")
+section("records: claims, the shared column and school matching")
 local dp = KF:CurrentPair()
 SlashCmdList.KRAKENFRIENDS("records reset")
-check(KF.db.settings.guessRecords == false, "per-player guessing is off")
+check(KF.db.settings.guessRecords == false, "the experimental records are off")
 UNITS.target = { guid = "Creature-0-1-0-1-3100-00000400", name = "Pack Wolf", hostile = true, ctype = 1, level = 12, threat = { player = 1 } }
 UNITS.nameplate7 = { guid = "Creature-0-1-0-1-3101-00000401", name = "Idle Wolf", hostile = true, ctype = 1, level = 12 }
 UNITS.party1.target = nil
 TickAll()
--- off by default: nothing at all is recorded, not even the shared record
+-- off by default: nothing at all is recorded and the Records block is hidden
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "z0", 133)
 FireEvent("UNIT_COMBAT", "target", "WOUND", "CRITICAL", 555, 4)
-check(dp.records.duo.crit == nil and dp.records.me.crit == nil, "with the feature off (the default) nothing is recorded")
+check(dp.records.me.crit == nil and dp.records.partner.crit == nil, "with the feature off (the default) nothing is recorded")
 CAPTURE = {}
 KF.UI.scope = nil
 KF.UI:SelectTab("Overview")
@@ -389,68 +392,79 @@ CAPTURE = nil
 SlashCmdList.KRAKENFRIENDS("records")
 check(KF.db.settings.guessRecords == true, "/kf records switches the experimental records on")
 Advance(5) -- casts from the earlier tests must not count as recent
--- together: a crit on a creature we are fighting is recorded for the duo, with its school named
+
+-- a hit nobody can explain is never recorded: a passing stranger's holy crit
+FireEvent("UNIT_COMBAT", "target", "WOUND", "CRITICAL", 371, 2)
+check(dp.records.me.crit == nil and dp.records.partner.crit == nil, "a hit that fits nobody's casts is not recorded")
+-- a hit of another school than my last cast is not mine either
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "z1", 133) -- fire
+FireEvent("UNIT_COMBAT", "target", "WOUND", "CRITICAL", 372, 2) -- holy
+check(dp.records.me.crit == nil, "a holy hit right after my fire spell is not mine")
+-- a hit that fits my cast is
+Advance(5)
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "z2", 133)
 FireEvent("UNIT_COMBAT", "target", "WOUND", "CRITICAL", 777, 4)
-check(dp.records.duo.crit and dp.records.duo.crit.n == 777 and dp.records.duo.crit.s == "Fire", "together record: crit on a creature we fight, school named")
-check(dp.records.duo.hit and dp.records.duo.hit.n == 777, "...and it is also the biggest hit")
-check(dp.records.me.crit == nil and dp.records.partner.crit == nil, "...and it is credited to no single player")
--- a creature nobody is fighting is ignored
-FireEvent("UNIT_COMBAT", "nameplate7", "WOUND", "CRITICAL", 5000, 4)
-check(dp.records.duo.crit.n == 777, "a creature nobody is fighting is ignored (shared record)")
--- in a bigger group the shared record does not count: the others' hits would be in it
+check(dp.records.me.crit and dp.records.me.crit.n == 777 and dp.records.me.crit.s == "Fireball", "a fire hit after my fire spell is mine")
+-- a physical ability names no school, which means physical: it claims a physical hit even
+-- while I cast fire, and my fire spell claims nothing physical
+Advance(5)
+UNITS.party1.target = "target"
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "z3", 133)  -- my Fireball (fire)
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "party1", "z4", 78)   -- his Heroic Strike (no school named)
+FireEvent("UNIT_COMBAT", "target", "WOUND", "CRITICAL", 888, 1)
+check(dp.records.partner.crit and dp.records.partner.crit.n == 888 and dp.records.partner.crit.s == "Heroic Strike", "a physical hit goes to the one with the physical ability")
+check(dp.records.me.crit.n == 777, "...not to the fire caster")
+-- the same hit seen on a second token counts once
+UNITS.nameplate6 = UNITS.target
+FireEvent("UNIT_COMBAT", "nameplate6", "WOUND", "CRITICAL", 888, 1)
+-- in a bigger group nothing is recorded: the others' hits would be in it
+Advance(5)
 local groupBefore = GROUP.n
 GROUP.n = 5
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "z5", 133)
 FireEvent("UNIT_COMBAT", "target", "WOUND", "CRITICAL", 6000, 4)
-check(dp.records.duo.crit.n == 777, "shared record ignores hits while the group is bigger than two")
+check(dp.records.me.crit.n == 777, "nothing is recorded while the group is bigger than two")
 GROUP.n = groupBefore
-check(dp.records.duo.crit.n == 777, "a creature nobody is fighting is ignored")
 -- a normal hit only raises the hit record
-FireEvent("UNIT_COMBAT", "target", "WOUND", "", 900, 1)
-check(dp.records.duo.hit.n == 900 and dp.records.duo.hit.s == "Physical" and dp.records.duo.crit.n == 777, "normal hit raises only the biggest hit")
--- once it is on, the Overview shows the shared record and the per-player columns
-CAPTURE = {}
-KF.UI.scope = nil
-KF.UI:SelectTab("Overview")
-local shown = table.concat(CAPTURE, " | ")
-CAPTURE = nil
-check(shown:find("Together") and shown:find("777") and shown:find("Experimental"), "Overview: the shared record, marked experimental")
-check(shown:find("no record yet"), "...with the per-player columns beside it")
+Advance(5)
+FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "z6", 133)
+FireEvent("UNIT_COMBAT", "target", "WOUND", "", 900, 4)
+check(dp.records.me.hit.n == 900 and dp.records.me.crit.n == 777, "a normal hit raises only the biggest hit")
 
 -- school matching: both of us cast on the same creature
-check(KF.db.settings.guessRecords == true, "the experimental records are on")
 UNITS.party1.target = "target"
 Advance(5)
 FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "c1", 133)   -- my Fireball (fire)
 FireEvent("UNIT_SPELLCAST_SUCCEEDED", "party1", "c2", 585)   -- his Smite (holy)
 FireEvent("UNIT_COMBAT", "target", "WOUND", "CRITICAL", 1111, 4)
-check(dp.records.me.crit and dp.records.me.crit.n == 1111 and dp.records.me.crit.s == "Fireball", "a fire hit while he cast a holy spell is mine")
-check(dp.records.partner.crit == nil, "...not his")
+check(dp.records.me.crit.n == 1111 and dp.records.me.crit.s == "Fireball", "a fire hit while he cast a holy spell is mine")
 Advance(5)
 FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "c3", 133)
 FireEvent("UNIT_SPELLCAST_SUCCEEDED", "party1", "c4", 585)
 FireEvent("UNIT_COMBAT", "target", "WOUND", "CRITICAL", 1222, 2)
-check(dp.records.partner.crit and dp.records.partner.crit.n == 1222 and dp.records.partner.crit.s == "Smite", "a holy hit while I cast a fire spell is his")
+check(dp.records.partner.crit.n == 1222 and dp.records.partner.crit.s == "Smite", "a holy hit while I cast a fire spell is his")
 check(dp.records.me.crit.n == 1111, "...not mine")
 Advance(5)
 FireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "c5", 133)
 FireEvent("UNIT_SPELLCAST_SUCCEEDED", "party1", "c6", 2136)  -- both fire
 FireEvent("UNIT_COMBAT", "target", "WOUND", "CRITICAL", 9999, 4)
-check(dp.records.me.crit.n == 1111 and dp.records.partner.crit.n == 1222, "two fire casters at once: ambiguous, credited to neither")
-check(dp.records.duo.crit.n == 9999, "...but the shared record still counts it")
--- the Overview now shows the per-player columns, marked as guesses
+check(dp.records.me.crit.n == 1111 and dp.records.partner.crit.n == 1222, "two fire casters at once: not recorded for anyone")
+
+-- the shared column is the better of the two; old stored 'together' values are not shown
+dp.records.duo.crit = { n = 99999, s = "Holy", t = 1 }
+local rec = KF.UI:Lists(KF.journey).records
+check(rec.duo.crit.n == 1222 and rec.me.crit.n == 1111 and rec.partner.crit.n == 1222, "the shared column is the better of the two, an old stored value is ignored")
 CAPTURE = {}
 KF.UI:Refresh()
 local on = table.concat(CAPTURE, " | ")
 CAPTURE = nil
-check(on:find("best guesses") and on:find("Together") and on:find("9,999"), "Overview: three columns once guessing is on")
--- the tooltip builder runs without errors
-local rec = KF.UI:Lists(KF.journey).records
-check(rec.duo.crit.n == 9999 and rec.me.crit.n == 1111 and rec.partner.crit.n == 1222, "merged records keep the three apart")
+check(on:find("best guesses") and on:find("Together") and on:find("1,222") and not on:find("99,999"), "Overview: three columns, the stored old value not shown")
+dp.records.duo.crit = nil
 SlashCmdList.KRAKENFRIENDS("records")
-check(KF.db.settings.guessRecords == false, "guessing switched off again")
+check(KF.db.settings.guessRecords == false, "switched off again")
 SlashCmdList.KRAKENFRIENDS("records reset")
 -- switching it on redraws the open window by itself (no need to reopen it)
-KF:SubmitHit("duo", 321, true, "Fire", "Training Dummy")
+KF:SubmitHit("me", 321, true, "Fire", "Training Dummy")
 CAPTURE = {}
 SlashCmdList.KRAKENFRIENDS("records")
 Advance(1)
@@ -571,11 +585,16 @@ say("C|" .. alt .. "|" .. me .. "|WARRIOR|MAGE|q=" .. (q1 + 1))
 FireEvent("CHAT_MSG_ADDON", "KRAKENFR", SECRET, "PARTY", alt)
 check(myAlt.stats.quests == q1 + 1, "a hidden (secret) message is ignored without errors")
 
--- the shared record travels too
-say("R|" .. alt .. "|" .. me .. "|crit|4321|1790000000|Fire|Pack Wolf")
-check(myAlt.records.duo.crit and myAlt.records.duo.crit.n >= 4321, "a bigger shared record is taken over")
-say("R|" .. alt .. "|" .. me .. "|crit|10|1790000000|Fire|Pack Wolf")
-check(myAlt.records.duo.crit.n >= 4321, "...and a smaller one is not")
+-- the friend's own best hit travels one way, into my partner column
+say("Q|" .. alt .. "|" .. me .. "|crit|4321|1790000000|Smite|Pack Wolf")
+check(myAlt.records.partner.crit and myAlt.records.partner.crit.n >= 4321 and myAlt.records.partner.crit.s == "Smite", "his best crit arrives in my partner column")
+say("Q|" .. alt .. "|" .. me .. "|crit|10|1790000000|Smite|Pack Wolf")
+check(myAlt.records.partner.crit.n >= 4321, "...and a smaller one does not replace it")
+local mineBefore = myAlt.records.me.crit and myAlt.records.me.crit.n
+say("Q|" .. alt .. "|" .. me .. "|crit|99999|1790000000|Smite|Pack Wolf")
+check((myAlt.records.me.crit and myAlt.records.me.crit.n) == mineBefore, "...and nothing ever writes into my own column")
+say("R|" .. alt .. "|" .. me .. "|crit|88888|1790000000|Fire|Pack Wolf")
+check(myAlt.records.duo.crit == nil or myAlt.records.duo.crit.n ~= 88888, "the old shared-record message of version 1.2.0 is ignored")
 
 -- the changes are reported in one line per chapter
 Advance(3)
@@ -958,8 +977,8 @@ do
     src.mobs[116] = { n = "Defias Bandit", c = 60, ty = "humanoid", lv = 14 }
     src.items[2244] = { n = "Krol Blade", q = 4, c = 2, me = 5, pa = 2, t = 1790000500, l = 1790000600 }
     src.toughest = { n = "Edwin VanCleef", lv = 22 }
-    src.records.duo.crit = { n = 999, s = "Fire", d = "Pack Wolf", t = 1790000700 }
-    src.records.duo.hit = { n = 999, s = "Fire", d = "Pack Wolf", t = 1790000700 }
+    src.records.me.crit = { n = 999, s = "Fireball", d = "Pack Wolf", t = 1790000700, ch = "Alpha" }
+    src.records.me.hit = { n = 999, s = "Fireball", d = "Pack Wolf", t = 1790000700, ch = "Alpha" }
 
     local backup = { id = KF.journey.id, data = KF.DeepCopy(KF.journey) }
     local msgs = S.Messages(src)
@@ -989,7 +1008,8 @@ do
     local it = got.items[2244]
     check(it and it.q == 4 and it.c == 2 and it.me == 2 and it.pa == 5 and it.n == "Krol Blade" and it.t == 1790000500 and it.l == 1790000600, "an item arrives complete, its 'me' and 'partner' swapped")
     check(got.toughest and got.toughest.lv == 22 and got.toughest.n == "Edwin VanCleef", "the toughest foe arrives")
-    check(got.records.duo.crit and got.records.duo.crit.n == 999 and got.records.duo.crit.s == "Fire" and got.records.duo.crit.d == "Pack Wolf", "the shared record arrives")
+    check(got.records.partner.crit and got.records.partner.crit.n == 999 and got.records.partner.crit.s == "Fireball" and got.records.partner.crit.d == "Pack Wolf", "his own best crit arrives in my partner column")
+    check(next(got.records.me) == nil, "...and my own column stays empty")
 
     -- and sending it again changes nothing
     local before = KF.DeepCopy(got)
@@ -1010,6 +1030,80 @@ do
     KF:RestoreBackup()
     KF.db.backup = nil
     KF.db.settings.sync = false
+end
+
+section("look: classic (default) and the game's own style")
+do
+    local UI = KF.UI
+    local function chatHas(text)
+        for i = #CHAT, 1, -1 do if CHAT[i]:find(text, 1, true) then return true end end
+        return false
+    end
+    check(KF.db.settings.style == "classic" and KF.palette == "classic", "the original teal look is the default")
+    check(KF.Theme.accent[1] == 0.31 and KF.Theme.accent[3] == 0.77 and KF.Theme.bg[4] == 0.96, "the Theme carries the teal colours")
+    check(UI.backdrop == nil and UI.title == nil, "the window has the teal frame, without the gold border and title")
+    check(UI:CreateBackdrop(CreateFrame("Frame")) == "classic", "the classic frame builder is used")
+
+    -- the game's own look, chosen through the saved setting
+    KF.db.settings.style = "wow"
+    KF:LoadDB()
+    local A = KF.Theme.accent
+    check(KF.palette == "wow" and A[1] == 1 and A[2] == 0.82 and A[3] == 0, "wow brings the gold of the game's look")
+    check(KF.Theme.bg[4] == 0 and KF.Theme.ring[4] == 1, "...the background is left to the backdrop and the icon cut-out stays solid")
+    check(UI:CreateBackdrop(CreateFrame("Frame")) == "wow" and UI.backdrop ~= nil and UI.title:GetText() == "Krakenfriends", "...with the gold border and the fantasy-font title")
+    -- back to classic
+    KF.db.settings.style = "classic"
+    KF:LoadDB()
+    check(KF.palette == "classic" and KF.Theme.accent[1] == 0.31 and KF.Theme.bg[4] == 0.96, "classic brings the teal colours back")
+    check(UI:CreateBackdrop(CreateFrame("Frame")) == "classic" and UI.backdrop == nil and UI.title == nil, "...and the teal frame")
+    -- an unknown value falls back to the default
+    KF.db.settings.style = "weird"
+    KF:LoadDB()
+    check(KF.db.settings.style == "classic" and KF.palette == "classic", "an unknown style falls back to the original look")
+
+    -- the command
+    local popups = #POPUPS
+    SlashCmdList.KRAKENFRIENDS("style")
+    check(chatHas("current look: classic") and #POPUPS == popups, "/kf style on its own says which look is active")
+    SlashCmdList.KRAKENFRIENDS("style bogus")
+    check(#POPUPS == popups and KF.db.settings.style == "classic", "an unknown name changes nothing")
+    SlashCmdList.KRAKENFRIENDS("style wow")
+    check(KF.db.settings.style == "wow" and #POPUPS == popups + 1 and POPUPS[#POPUPS].which == "KRAKENFRIENDS_RELOAD", "/kf style wow is saved and offers a reload")
+    SlashCmdList.KRAKENFRIENDS("style classic")
+    check(KF.db.settings.style == "classic" and #POPUPS == popups + 1 and chatHas("already active"), "going back before reloading needs no reload")
+    SlashCmdList.KRAKENFRIENDS("status")
+    check(chatHas("look: classic"), "/kf status shows the look")
+
+    -- the welcome screen names the other look
+    local function welcome()
+        CAPTURE = {}
+        UI:ReleaseAll()
+        UI:BuildWelcome(0)
+        local text = table.concat(CAPTURE, " | ")
+        CAPTURE = nil
+        return text
+    end
+    check(welcome():find("/kf style wow", 1, true), "in the original look, the welcome screen points to the game's own look")
+    KF.db.settings.style = "wow"
+    KF:LoadDB()
+    check(welcome():find("/kf style classic", 1, true), "in the game's look, it points back to the original")
+    KF.db.settings.style = "classic"
+    KF:LoadDB()
+end
+
+section("records on by default: the one-time step for existing saves")
+do
+    -- a save from an older version: the records were off by default, and that false was saved
+    KF.db.settings.guessRecords = false
+    KF.db.settings.recordsMigrated = nil
+    KF:LoadDB()
+    check(KF.db.settings.guessRecords == true and KF.db.settings.recordsMigrated == true, "an older save is switched on once")
+    -- afterwards the player's own choice stays
+    SlashCmdList.KRAKENFRIENDS("records")
+    check(KF.db.settings.guessRecords == false, "the player switches them off")
+    KF:LoadDB()
+    check(KF.db.settings.guessRecords == false, "...and a later start doesn't switch them on again")
+    KF.db.settings.guessRecords = false -- the later tests expect them off
 end
 
 section("save + restore (beta safety net)")

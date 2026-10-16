@@ -25,8 +25,10 @@ local clean = KF.clean
 --    other; counts take the larger value, first-seen dates the earlier one, last-seen
 --    the later one, and the friend's "me" and "partner" item counts are swapped.
 --    Entries are never deleted. The journal is not synced (both copies already log
---    the same events at slightly different moments), nor the per-player record
---    guesses.
+--    the same events at slightly different moments).
+--  * The experimental hit and crit records (/kf records) travel one way: each
+--    player's own best hit and crit go into the friend's "partner" column, which
+--    nothing else writes to and which is never sent back.
 --------------------------------------------------------------------------------
 
 local S = {}
@@ -189,11 +191,12 @@ function S.Messages(pair, sent, key)
     local head = ("C|%s|%s|%s|%s|"):format(plain(pair.me), plain(pair.partner), pair.meClass or "-", pair.partnerClass or "-")
     local msgs = {}
     for _, c in ipairs(chunks(tokensFor(pair.stats), BUDGET - #head)) do msgs[#msgs + 1] = head .. c end
-    local duo = pair.records and pair.records.duo
+    -- this player's own best hit and crit; the friend's copy shows them in its partner column
+    local mine = pair.records and pair.records.me
     for _, kind in ipairs({ "hit", "crit" }) do
-        local r = duo and duo[kind]
+        local r = mine and mine[kind]
         if r and type(r.n) == "number" and r.n > 0 then
-            msgs[#msgs + 1] = ("R|%s|%s|%s|%d|%d|%s|%s"):format(plain(pair.me), plain(pair.partner), kind,
+            msgs[#msgs + 1] = ("Q|%s|%s|%s|%d|%d|%s|%s"):format(plain(pair.me), plain(pair.partner), kind,
                 math.floor(r.n), math.floor(r.t or 0), plain(r.s), plain(r.d))
         end
     end
@@ -324,7 +327,7 @@ local function flush()
         for _, kind in ipairs({ "items", "mobs", "rares", "bosses", "dungeons", "zones" }) do
             if c.new and c.new[kind] then parts[#parts + 1] = ("%d new %s"):format(c.new[kind], NEW_LABEL[kind]) end
         end
-        if c.records then parts[#parts + 1] = "new shared record" end
+        if c.records then parts[#parts + 1] = "new record" end
         if c.created then table.insert(parts, 1, "new chapter") end
         if #parts > 0 then
             KF:Printf("synced with %s (%s): %s", name, chapterLabel(key), table.concat(parts, ", "))
@@ -485,7 +488,10 @@ function S:OnChapter(sender, text)
     end
 end
 
-function S:OnRecord(sender, text)
+-- The friend's own best hit or crit, as his copy recorded it for him: it goes into my
+-- "partner" column, and only there. Nothing ever writes into my own column, and my
+-- partner column is never sent back, so the two copies can't overwrite each other.
+function S:OnPlayerRecord(sender, text)
     local p, j = partnerAndJourney(sender)
     if not (j and S.peer and S.peer.name == p.name) then return end
     local _, me, partner, kind, n, t, spell, target = strsplit("|", text)
@@ -493,9 +499,9 @@ function S:OnRecord(sender, text)
     if not (t and t >= 0 and t <= 4e9) then t = nil end
     if not (validName(me) and validName(partner) and (kind == "hit" or kind == "crit") and n and n > 0 and n <= MAX_VALUE) then return end
     local pair, key = chapterFor(j, me, partner, nil, nil)
-    local duo = pair.records.duo
-    if not duo[kind] or n > duo[kind].n then
-        duo[kind] = { n = n, s = (spell ~= "" and spell or nil), d = (target ~= "" and target or nil), t = t or KF.Now() }
+    local theirs = pair.records.partner
+    if not theirs[kind] or n > theirs[kind].n then
+        theirs[kind] = { n = n, s = (spell ~= "" and spell or nil), d = (target ~= "" and target or nil), t = t or KF.Now(), ch = KF.DisplayName(pair.partner) }
         note(key, "@record")
     end
 end
@@ -636,7 +642,7 @@ KF:On("CHAT_MSG_ADDON", function(prefix, text, channel, sender)
     prefix, text, sender = clean(prefix), clean(text), clean(sender)
     if prefix ~= KF.msgPrefix or type(text) ~= "string" or type(sender) ~= "string" or not KF.me then return end
     local kind = text:sub(1, 2)
-    if kind ~= "H|" and kind ~= "C|" and kind ~= "R|" and kind ~= "L|" then return end -- ping and pong live in Core
+    if kind ~= "H|" and kind ~= "C|" and kind ~= "Q|" and kind ~= "L|" then return end -- ping and pong live in Core
     if KF.IsSender(sender, KF.me) then return end                      -- our own message echoed back
     if not KF.db.settings.sync then return end
     if KF.db.settings.debug then
@@ -646,7 +652,7 @@ KF:On("CHAT_MSG_ADDON", function(prefix, text, channel, sender)
     if kind == "H|" then S:OnHello(sender, text)
     elseif kind == "C|" then S:OnChapter(sender, text)
     elseif kind == "L|" then S:OnList(sender, text)
-    else S:OnRecord(sender, text) end
+    else S:OnPlayerRecord(sender, text) end
 end)
 
 --------------------------------------------------------------------------------

@@ -291,6 +291,7 @@ function KF:PrintStatus()
     local p, j = self.partner, self.journey
     self:Printf("v%s, data source: %s", self.version, self.dbSource or "?")
     self:Printf("addon messages to your friend: %s", self.messagingWorks and "work (tested with /kf ping)" or "untested (try /kf ping)")
+    self:Printf("look: %s (/kf style)", self.palette or "wow")
     local b = self.db.backup
     if b and b.t then self:Printf("backup for /kf restore: the state before the sync at %s", date("%d %b %H:%M", b.t)) end
     self:Printf("syncing with your friend: %s%s", self.db.settings.sync and "on" or "off", self.Sync and self.Sync.lastSync and (", last exchange " .. date("%H:%M", self.Sync.lastSync.t)) or "")

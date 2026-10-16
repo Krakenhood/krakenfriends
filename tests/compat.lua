@@ -23,7 +23,8 @@ local function cmp(a, b, path)
         if w == nil then lost = lost + 1; print("  LOST: " .. p)
         elseif type(v) == "table" then
             if type(w) ~= "table" then changed = changed + 1; print("  CHANGED: " .. p) else cmp(v, w, p) end
-        elseif v ~= w and not (path == "" and (k == "version" or k == "savedAt")) then
+        -- allowed to change: the save counters, and the one-time switch-on of the records in older saves
+        elseif v ~= w and not (path == "" and (k == "version" or k == "savedAt")) and not (path == ".settings" and (k == "guessRecords" or k == "recordsMigrated")) then
             changed = changed + 1
             print("  CHANGED: " .. p .. " " .. tostring(v) .. " -> " .. tostring(w))
         end

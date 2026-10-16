@@ -351,7 +351,7 @@ function factories.pair(parent)
     w.a:SetSize(24, 24)
     w.a:SetPoint("LEFT", 8, 0)
     Circle(w.a)
-    local gap = Solid(w, "ARTWORK", Theme.bg)
+    local gap = Solid(w, "ARTWORK", Theme.ring)
     gap:SetDrawLayer("ARTWORK", 2)
     gap:SetSize(28, 28)
     gap:SetPoint("LEFT", 22, 0)
@@ -681,7 +681,7 @@ function UI:Lists(j)
             it.by[key] = e.c
         end
         for i, e in ipairs(p.log) do L.log[#L.log + 1] = { e = e, pair = key, i = i } end
-        for _, who in ipairs({ "me", "partner", "duo" }) do
+        for _, who in ipairs({ "me", "partner" }) do
             for _, kind in ipairs({ "hit", "crit" }) do
                 local r = p.records and p.records[who] and p.records[who][kind]
                 local best = L.records[who][kind]
@@ -692,7 +692,7 @@ function UI:Lists(j)
         if tough and tough.n and (tough.lv or 0) > ((L.toughest and L.toughest.lv) or 0) then L.toughest = tough end
     end
 
-    -- the shared record is never below either player's
+    -- the shared record is the better of the two players' records (the old stored "together" values are not shown)
     for _, kind in ipairs({ "hit", "crit" }) do
         local best = L.records.duo[kind]
         for _, who in ipairs({ "me", "partner" }) do
@@ -726,14 +726,17 @@ end
 --------------------------------------------------------------------------------
 
 function UI:BuildWelcome(y)
+    local hint = KF.palette == "classic" and "|cff4fd1c5" or "|cffffd100" -- the look's accent colour for commands
     y = self:Section(y, "Welcome")
     y = self:Note(y, "|cffffffffYour journey starts with a friend.|r\n\n" ..
         "1.  Group up with your friend.\n" ..
-        "2.  Accept the Krakenfriends prompt, or target them and type |cff4fd1c5/kf partner|r.\n" ..
+        "2.  Accept the Krakenfriends prompt, or target them and type " .. hint .. "/kf partner|r.\n" ..
         "3.  Play! Kills, loot, gold, dungeons and more are counted whenever you two are together.\n\n" ..
         "Both of you can install Krakenfriends. Each keeps their own journal, and your alts are " ..
         "linked automatically through Battle.net.\n\n" ..
-        "Curious what it looks like? Type |cff4fd1c5/kf demo|r.")
+        "Curious what it looks like? Type " .. hint .. "/kf demo|r.\n\n" ..
+        (KF.palette == "classic" and ("Prefer the game's own look? Type " .. hint .. "/kf style wow|r.")
+            or ("Prefer the original teal look? Type " .. hint .. "/kf style classic|r.")))
     return y
 end
 
@@ -816,7 +819,7 @@ function UI:BuildOverview(y, j, s, L)
         y = self:Section(y, "Records")
         local sides = true
         if KF.recordsAreGuesses then
-            y = self:Note(y, "Experimental (/kf records): left and right are best guesses; the middle is the biggest hit in fights you share.")
+            y = self:Note(y, "Experimental (/kf records): left and right are best guesses from each player's own spell casts; the middle is the better of the two.")
         end
         y = self:Record(y, "Biggest crit", "crit", rec, nameA, classA, nameB, classB, L.multi, sides, CRIT_COLOR)
         y = self:Record(y, "Biggest hit", "hit", rec, nameA, classA, nameB, classB, L.multi, sides)
@@ -1122,6 +1125,70 @@ local function FillCard(card, name, class, level, unit, withPortrait)
     if withPortrait then SetPortrait(card.portrait, unit, class) end
 end
 
+-- The game's own look: dark stone inside a gold dialog border. The file names are tried in
+-- order and the first one the client actually has is used (a missing file shows as a green square).
+local WOW_EDGES = { "Interface\\DialogFrame\\UI-DialogBox-Gold-Border", "Interface\\DialogFrame\\UI-DialogBox-Border" }
+local WOW_BACKS = { "Interface\\FrameGeneral\\UI-Background-Rock", "Interface\\DialogFrame\\UI-DialogBox-Background-Dark" }
+
+local function firstFile(list)
+    for _, path in ipairs(list) do
+        if not GetFileIDFromPath or call(GetFileIDFromPath, path) then return path end
+    end
+    return list[#list]
+end
+
+function UI:CreateWoWFrame(f)
+    local frame = CreateFrame("Frame", nil, f, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    frame:SetPoint("TOPLEFT", -7, 7)
+    frame:SetPoint("BOTTOMRIGHT", 7, -7)
+    frame:SetFrameLevel(math.max(0, f:GetFrameLevel()))
+    if frame.SetBackdrop then
+        frame:SetBackdrop({
+            bgFile = firstFile(WOW_BACKS), tile = true, tileSize = 256,
+            edgeFile = firstFile(WOW_EDGES), edgeSize = 32,
+            insets = { left = 9, right = 9, top = 9, bottom = 9 },
+        })
+        frame:SetBackdropColor(0.55, 0.55, 0.55, 1)
+    end
+    -- a dark band behind the title
+    local band = Solid(f, "BACKGROUND", { 0, 0, 0 }, 0.45)
+    band:SetPoint("TOPLEFT", 2, -2)
+    band:SetPoint("TOPRIGHT", -2, -2)
+    band:SetHeight(22)
+    return frame, band
+end
+
+-- The look chosen in the settings: the original teal one (default) or the game's own.
+-- Returns which one was drawn.
+function UI:CreateBackdrop(f)
+    self.backdrop, self.band, self.title = nil, nil, nil
+    if KF.palette == "classic" then
+        -- deep panel, faint teal glow at the top, teal-to-violet rim
+        local bg = Solid(f, "BACKGROUND", Theme.bg)
+        bg:SetAllPoints()
+        local glow = f:CreateTexture(nil, "BACKGROUND", nil, 1)
+        glow:SetPoint("TOPLEFT", 1, -1)
+        glow:SetPoint("TOPRIGHT", -1, -1)
+        glow:SetHeight(130)
+        Gradient(glow, "VERTICAL", Theme.accent, 0, Theme.accent, 0.09)
+        Border(f, Theme.line, 0.10)
+        local rim = f:CreateTexture(nil, "ARTWORK")
+        rim:SetPoint("TOPLEFT", 1, -1)
+        rim:SetPoint("TOPRIGHT", -1, -1)
+        rim:SetHeight(2)
+        Gradient(rim, "HORIZONTAL", Theme.accent, 1, Theme.accent2, 1)
+        return "classic"
+    end
+    self.backdrop, self.band = self:CreateWoWFrame(f)
+    -- the title, in the game's fantasy font and gold (with a fallback if the font is missing)
+    local title = Text(f, 15, Theme.accent)
+    title:SetPoint("TOPLEFT", PAD, -6)
+    if not pcall(title.SetFont, title, "Fonts\\MORPHEUS.TTF", 16, "") then title:SetFont(FONT, 14, "") end
+    title:SetText("Krakenfriends")
+    self.title = title
+    return "wow"
+end
+
 function UI:Create()
     if self.frame then return end
     local f = CreateFrame("Frame", "KrakenfriendsFrame", UIParent)
@@ -1157,20 +1224,7 @@ function UI:Create()
         f:SetPoint("CENTER")
     end
 
-    -- backdrop: deep panel, faint teal glow at the top, teal-to-violet rim
-    local bg = Solid(f, "BACKGROUND", Theme.bg)
-    bg:SetAllPoints()
-    local glow = f:CreateTexture(nil, "BACKGROUND", nil, 1)
-    glow:SetPoint("TOPLEFT", 1, -1)
-    glow:SetPoint("TOPRIGHT", -1, -1)
-    glow:SetHeight(130)
-    Gradient(glow, "VERTICAL", Theme.accent, 0, Theme.accent, 0.09)
-    Border(f, Theme.line, 0.10)
-    local rim = f:CreateTexture(nil, "ARTWORK")
-    rim:SetPoint("TOPLEFT", 1, -1)
-    rim:SetPoint("TOPRIGHT", -1, -1)
-    rim:SetHeight(2)
-    Gradient(rim, "HORIZONTAL", Theme.accent, 1, Theme.accent2, 1)
+    self:CreateBackdrop(f)
 
     -- close
     local close = CreateFrame("Button", nil, f)

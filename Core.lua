@@ -368,10 +368,10 @@ function KF:SubmitHit(who, amount, crit, spell, target)
         if not old or amount > old.n then
             recs[who][kind] = { n = amount, s = spell, d = target, t = KF.Now(), ch = char }
             changed = true
-            -- announce clear improvements of a crit record, at most once a minute per player
+            -- announce clear improvements of a crit record, at most once every five minutes per player
             if kind == "crit" and old and old.n >= 20 and amount >= old.n * 1.2 then
                 local now = GetTime()
-                if now - (lastRecordToast[who] or -60) >= 60 then
+                if now - (lastRecordToast[who] or -300) >= 300 then
                     lastRecordToast[who] = now
                     local text = ("%s crit for %s%s"):format(who == "me" and "You" or who == "duo" and "You two" or char or "?", KF.FormatNumber(amount), spell and (" (" .. spell .. ")") or "")
                     self:Log("record", text)
@@ -417,7 +417,7 @@ end
 --------------------------------------------------------------------------------
 
 local DEFAULTS = {
-    settings = { debug = false, toasts = true, guessRecords = false, sync = true, minimap = { angle = 205, hide = false }, window = {} },
+    settings = { debug = false, toasts = true, guessRecords = true, recordsMigrated = false, sync = true, style = "classic", minimap = { angle = 205, hide = false }, window = {} },
     journeys = {},
     ignored = {},
 }
@@ -438,12 +438,24 @@ function KF:LoadDB()
     if not db then db, source = { created = KF.Now() }, "new" end
 
     fill(db, DEFAULTS)
+    -- The records used to be off by default, and that "false" was saved for everyone. They are
+    -- on by default now, so every save is switched on once; after that /kf records is the player's choice.
+    if not db.settings.recordsMigrated then
+        db.settings.guessRecords = true
+        db.settings.recordsMigrated = true
+    end
     db.created = db.created or KF.Now()
     db.version = DB_VERSION
     for _, j in pairs(db.journeys) do upgradeJourney(j) end
 
-    KrakenfriendsDB, KrakenfriendsCharDB, KrakenfriendsRestore = db, db, nil
+    KrakenfriendsDB = db
     self.db, self.dbSource = db, source
+
+    -- the chosen look: its colours replace the Theme before any frame is built
+    local style = db.settings.style == "wow" and "wow" or "classic"
+    db.settings.style = style
+    for k, v in pairs(KF.Palettes[style]) do KF.Theme[k] = v end
+    self.palette = style -- what was applied, to know when a reload is needed
 end
 
 --------------------------------------------------------------------------------
@@ -591,6 +603,16 @@ if StaticPopupDialogs then
     }
 end
 
+if StaticPopupDialogs then
+    StaticPopupDialogs.KRAKENFRIENDS_RELOAD = {
+        text = "This look has a different frame and colours.\n\nReload the interface now to see it?",
+        button1 = YES or "Yes",
+        button2 = NO or "No",
+        OnAccept = function() ReloadUI() end,
+        timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+    }
+end
+
 function KF:ResetJourney(id)
     local old = id and self.db.journeys[id]
     if not old then return end
@@ -608,8 +630,9 @@ local HELP = {
     "|cff4fd1c5/kf minimap|r: show or hide the minimap button",
     "|cff4fd1c5/kf toasts|r: turn milestone pop-ups on or off",
     "|cff4fd1c5/kf reset|r: reset the journey shown in the window",
-    "|cff4fd1c5/kf records|r: experimental hit and crit records on or off, off by default (|cff4fd1c5/kf records reset|r clears them)",
+    "|cff4fd1c5/kf records|r: experimental hit and crit records on or off, on by default (|cff4fd1c5/kf records reset|r clears them)",
     "|cff4fd1c5/kf sync|r: send your journey to your friend now (|cff4fd1c5/kf sync off|r and |cff4fd1c5on|r switch automatic syncing)",
+    "|cff4fd1c5/kf style wow|r or |cff4fd1c5classic|r: the game's own gold-and-stone look, or the original teal one (the default)",
     "|cff4fd1c5/kf restore|r: undo the last sync (puts your journey back to how it was just before it changed anything)",
     "|cff4fd1c5/kf ping|r: test whether the addon can message your friend's copy (both need this version)",
     "|cff4fd1c5/kf debug|r: print tracking details to chat",
@@ -638,6 +661,18 @@ function KF:Slash(input)
         self:Ping()
     elseif cmd == "sync" then
         self.Sync:Command(rest)
+    elseif cmd == "style" then
+        local want = rest:lower()
+        if want ~= "wow" and want ~= "classic" then
+            self:Printf("current look: %s. Use /kf style wow (the game's own gold-and-stone look) or /kf style classic (the original teal look, the default).", settings.style)
+        else
+            settings.style = want
+            if want ~= self.palette and StaticPopup_Show then
+                StaticPopup_Show("KRAKENFRIENDS_RELOAD")
+            else
+                self:Print("that look is already active.")
+            end
+        end
     elseif cmd == "restore" then
         local b = self.db.backup
         if not (b and type(b.data) == "table") then

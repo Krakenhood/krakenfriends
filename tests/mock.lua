@@ -236,8 +236,8 @@ C_ChatInfo = {
     AreOutgoingAddonChatMessagesRestricted = function() return true end,
 }
 C_Spell = {
-    GetSpellName = function(id) return ({ [133] = "Fireball", [585] = "Smite", [2136] = "Fire Blast" })[id] end,
-    GetSpellDescription = function(id) return ({ [133] = "Hurls a fiery ball that deals 50 Fire damage.", [585] = "Smites an enemy for 40 Holy damage.", [2136] = "Blasts the enemy for 30 Fire damage." })[id] end,
+    GetSpellName = function(id) return ({ [133] = "Fireball", [585] = "Smite", [2136] = "Fire Blast", [78] = "Heroic Strike" })[id] end,
+    GetSpellDescription = function(id) return ({ [133] = "Hurls a fiery ball that deals 50 Fire damage.", [585] = "Smites an enemy for 40 Holy damage.", [2136] = "Blasts the enemy for 30 Fire damage.", [78] = "A strong attack that increases melee damage by 5 and causes a high amount of threat." })[id] end,
 }
 SPELL_SCHOOL0_NAME, SPELL_SCHOOL1_NAME, SPELL_SCHOOL2_NAME, SPELL_SCHOOL3_NAME = "Physical", "Holy", "Fire", "Nature"
 SPELL_SCHOOL4_NAME, SPELL_SCHOOL5_NAME, SPELL_SCHOOL6_NAME = "Frost", "Shadow", "Arcane"
