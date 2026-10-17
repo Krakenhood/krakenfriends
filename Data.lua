@@ -42,7 +42,8 @@ KR.Stances = {
 }
 
 --------------------------------------------------------------------------------
--- Abilities. `id` is rank 1; the rank you actually know is looked up by name.
+-- Abilities. `id` is rank 1; the rank you actually know is looked up by name
+-- (`name` is the English one, used only when the client can't name the spell).
 -- `cost` is the base rage cost, used only when the game can't tell us the real
 -- one (talents lower Heroic Strike, Sunder Armor and Execute).
 -- `stances` lists where it can be used (nil = anywhere).
@@ -54,30 +55,30 @@ KR.Stances = {
 local B, D, Z = "battle", "defensive", "berserker"
 
 KR.Abilities = {
-    { key = "hs",        id = 78,    cost = 15, short = "HS",  icon = "Ability_Rogue_Ambush", tick = true, swing = true },
-    { key = "cleave",    id = 845,   cost = 20, short = "Cl",  icon = "Ability_Warrior_Cleave", swing = true },
-    { key = "execute",   id = 5308,  cost = 15, short = "Ex",  icon = "INV_Sword_48", tick = true, stances = { B, Z } },
-    { key = "ms",        id = 12294, cost = 30, short = "MS",  icon = "Ability_Warrior_SavageBlow", tick = true, main = true },
-    { key = "bt",        id = 23881, cost = 30, short = "BT",  icon = "Spell_Nature_BloodLust", tick = true, main = true },
-    { key = "ss",        id = 23922, cost = 20, short = "SS",  icon = "INV_Shield_05", tick = true, main = true },
-    { key = "ww",        id = 1680,  cost = 25, short = "WW",  icon = "Ability_Whirlwind", tick = true, stances = { Z } },
-    { key = "sunder",    id = 7386,  cost = 15, short = "SA",  icon = "Ability_Warrior_Sunder", tick = true },
-    { key = "revenge",   id = 6572,  cost = 5,  short = "Rv",  icon = "Ability_Warrior_Revenge", tick = true, stances = { D } },
-    { key = "overpower", id = 7384,  cost = 5,  short = "OP",  icon = "Ability_MeleeDamage", tick = true, stances = { B } },
-    { key = "slam",      id = 1464,  cost = 15, short = "Sl",  icon = "Ability_Warrior_DecisiveStrike" },
-    { key = "tclap",     id = 6343,  cost = 20, short = "TC",  icon = "Spell_Nature_ThunderClap", stances = { B } },
-    { key = "rend",      id = 772,   cost = 10, short = "Re",  icon = "Ability_Gouge", stances = { B, D } },
-    { key = "hamstring", id = 1715,  cost = 10, short = "Ha",  icon = "Ability_ShockWave", stances = { B, Z } },
-    { key = "pummel",    id = 6552,  cost = 10, short = "Pu",  icon = "INV_Gauntlets_04", stances = { Z } },
-    { key = "bash",      id = 72,    cost = 10, short = "SB",  icon = "Ability_Warrior_ShieldBash", stances = { B, D } },
-    { key = "block",     id = 2565,  cost = 10, short = "Bl",  icon = "Ability_Defend", stances = { D } },
-    { key = "shout",     id = 6673,  cost = 10, short = "BS",  icon = "Ability_Warrior_BattleShout" },
-    { key = "demo",      id = 1160,  cost = 10, short = "DS",  icon = "Ability_Warrior_WarCry" },
-    { key = "intercept", id = 20252, cost = 10, short = "In",  icon = "Ability_Rogue_Sprint", stances = { Z } },
-    { key = "sweeping",  id = 12292, cost = 30, short = "SwS", icon = "Ability_Rogue_SliceDice", stances = { B } },
-    { key = "concussion", id = 12809, cost = 15, short = "CB", icon = "Ability_ThunderBolt" },
-    { key = "bloodrage", id = 2687,  cost = 0,  short = "BR",  icon = "Ability_Racial_BloodRage", gives = true },
-    { key = "charge",    id = 100,   cost = 0,  short = "Ch",  icon = "Ability_Warrior_Charge", gives = true, stances = { B } },
+    { key = "hs",        id = 78, name = "Heroic Strike",    cost = 15, short = "HS",  icon = "Ability_Rogue_Ambush", tick = true, swing = true },
+    { key = "cleave",    id = 845, name = "Cleave",   cost = 20, short = "Cl",  icon = "Ability_Warrior_Cleave", swing = true },
+    { key = "execute",   id = 5308, name = "Execute",  cost = 15, short = "Ex",  icon = "INV_Sword_48", tick = true, stances = { B, Z } },
+    { key = "ms",        id = 12294, name = "Mortal Strike", cost = 30, short = "MS",  icon = "Ability_Warrior_SavageBlow", tick = true, main = true },
+    { key = "bt",        id = 23881, name = "Bloodthirst", cost = 30, short = "BT",  icon = "Spell_Nature_BloodLust", tick = true, main = true },
+    { key = "ss",        id = 23922, name = "Shield Slam", cost = 20, short = "SS",  icon = "INV_Shield_05", tick = true, main = true },
+    { key = "ww",        id = 1680, name = "Whirlwind",  cost = 25, short = "WW",  icon = "Ability_Whirlwind", tick = true, stances = { Z } },
+    { key = "sunder",    id = 7386, name = "Sunder Armor",  cost = 15, short = "SA",  icon = "Ability_Warrior_Sunder", tick = true },
+    { key = "revenge",   id = 6572, name = "Revenge",  cost = 5,  short = "Rv",  icon = "Ability_Warrior_Revenge", tick = true, stances = { D } },
+    { key = "overpower", id = 7384, name = "Overpower",  cost = 5,  short = "OP",  icon = "Ability_MeleeDamage", tick = true, stances = { B } },
+    { key = "slam",      id = 1464, name = "Slam",  cost = 15, short = "Sl",  icon = "Ability_Warrior_DecisiveStrike" },
+    { key = "tclap",     id = 6343, name = "Thunder Clap",  cost = 20, short = "TC",  icon = "Spell_Nature_ThunderClap", stances = { B } },
+    { key = "rend",      id = 772, name = "Rend",   cost = 10, short = "Re",  icon = "Ability_Gouge", stances = { B, D } },
+    { key = "hamstring", id = 1715, name = "Hamstring",  cost = 10, short = "Ha",  icon = "Ability_ShockWave", stances = { B, Z } },
+    { key = "pummel",    id = 6552, name = "Pummel",  cost = 10, short = "Pu",  icon = "INV_Gauntlets_04", stances = { Z } },
+    { key = "bash",      id = 72, name = "Shield Bash",    cost = 10, short = "SB",  icon = "Ability_Warrior_ShieldBash", stances = { B, D } },
+    { key = "block",     id = 2565, name = "Shield Block",  cost = 10, short = "Bl",  icon = "Ability_Defend", stances = { D } },
+    { key = "shout",     id = 6673, name = "Battle Shout",  cost = 10, short = "BS",  icon = "Ability_Warrior_BattleShout" },
+    { key = "demo",      id = 1160, name = "Demoralizing Shout",  cost = 10, short = "DS",  icon = "Ability_Warrior_WarCry" },
+    { key = "intercept", id = 20252, name = "Intercept", cost = 10, short = "In",  icon = "Ability_Rogue_Sprint", stances = { Z } },
+    { key = "sweeping",  id = 12292, name = "Sweeping Strikes", cost = 30, short = "SwS", icon = "Ability_Rogue_SliceDice", stances = { B } },
+    { key = "concussion", id = 12809, name = "Concussion Blow", cost = 15, short = "CB", icon = "Ability_ThunderBolt" },
+    { key = "bloodrage", id = 2687, name = "Bloodrage",  cost = 0,  short = "BR",  icon = "Ability_Racial_BloodRage", gives = true },
+    { key = "charge",    id = 100, name = "Charge",   cost = 0,  short = "Ch",  icon = "Ability_Warrior_Charge", gives = true, stances = { B } },
 }
 
 KR.AbilityByKey = {}

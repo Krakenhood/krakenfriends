@@ -12,7 +12,7 @@ local C = KR.Coach
 local UI = {}
 KR.UI = UI
 
-local WIDTH, HEIGHT = 440, 520
+local WIDTH, HEIGHT = 440, 580
 local PAD = 18
 local INNER = WIDTH - PAD * 2
 local TOP = 66 -- where the pages start, under the title and tabs
@@ -204,6 +204,8 @@ local function stanceLine(r)
     return line
 end
 
+UI.SpentLine, UI.StanceLine = spentLine, stanceLine
+
 function UI:RenderFight()
     local page = self.pages.fight
     self.texts:Reset()
@@ -237,6 +239,7 @@ function UI:RenderFight()
     -- header: who, how long, when; the grade on the right
     local name = r.target or "Unknown foe"
     if CLASSIFICATION[r.cls or ""] then name = name .. "  " .. KR.Colorize(CLASSIFICATION[r.cls], T.warn) end
+    if r.practice then name = name .. "  " .. KR.Colorize("practice", T.faint) end
     local title = line(name, 16, T.gold, 2)
     title:SetWidth(INNER - 70)
     local meta = KR.FormatClock(r.dur) .. "  ·  " .. KR.FormatAgo(r.t)
@@ -386,6 +389,7 @@ function UI:RenderHistory()
             b.grade:SetTextColor(Wg.rgb(C.GradeColor(r.score)))
             local name = r.target or "Unknown foe"
             if CLASSIFICATION[r.cls or ""] then name = name .. " " .. KR.Colorize("(" .. CLASSIFICATION[r.cls] .. ")", T.warn) end
+            if r.practice then name = name .. " " .. KR.Colorize("practice", T.faint) end
             b.name:SetText(name)
             b.dur:SetText(KR.FormatClock(r.dur))
             b.ago:SetText(KR.FormatAgo(r.t))
@@ -415,10 +419,10 @@ function UI:CreateBarPage()
     self.checks = {}
     for i, o in ipairs(opts) do
         local cb = Wg.Check(page, o[1], o[2], o[3], o[4])
-        cb:SetPoint("TOPLEFT", (i % 2 == 1) and -4 or INNER / 2, -20 - math.floor((i - 1) / 2) * 24)
+        cb:SetPoint("TOPLEFT", -4, -20 - (i - 1) * 22)
         self.checks[#self.checks + 1] = cb
     end
-    local tickTop = 20 + math.ceil(#opts / 2) * 24 + 14
+    local tickTop = 20 + #opts * 22 + 14
     local th = Wg.Text(page, 13, T.gold)
     th:SetPoint("TOPLEFT", 0, -tickTop)
     th:SetText("Ticks on the bar")
@@ -496,7 +500,7 @@ function UI:Toast(r)
     local tips = C:Tips(r)
     local first = tips[1]
     local n = 0
-    for _, t in ipairs(tips) do if t.level ~= "good" then n = n + 1 end end
+    for i, t in ipairs(tips) do if t.level ~= "good" and i <= 6 then n = n + 1 end end -- the window shows six
     toast.text:SetText(first and (n > 0 and ("%d %s from the coach. Click to read."):format(n, n == 1 and "tip" or "tips") or "Clean fight. Click for details.") or "Click for details.")
     toast:SetAlpha(1)
     toast:Show()

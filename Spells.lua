@@ -51,6 +51,8 @@ local function spellIcon(id, fallback)
     return tex or ("Interface\\Icons\\" .. fallback)
 end
 
+S.SpellName, S.SpellIcon = spellName, spellIcon
+
 function S:Scan()
     wipe(self.known)
     wipe(self.byName)
@@ -84,7 +86,10 @@ function S:Known(key) return self.known[key] end
 
 function S:KeyOf(spellID)
     local name = spellName(spellID)
-    return name and self.byName[name]
+    if name then return self.byName[name] end
+    for _, a in ipairs(KR.Abilities) do
+        if a.id == spellID then return a.key end
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -238,6 +243,14 @@ function S:SunderStacks()
     local found, count = self:Aura("target", name, true)
     if found == nil then return nil end
     return found and count or 0
+end
+
+-- The enemy you have targeted: name, classification, level, GUID, dead. nil when there's none.
+function S:Target()
+    if not call(UnitExists, "target") or not call(UnitCanAttack, "player", "target") then return nil end
+    local name = call(UnitName, "target")
+    if type(name) ~= "string" then return nil end
+    return name, call(UnitClassification, "target"), call(UnitLevel, "target"), call(UnitGUID, "target"), call(UnitIsDead, "target")
 end
 
 -- Target health in percent, or nil when it's a secret.

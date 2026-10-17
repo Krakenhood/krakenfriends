@@ -17,3 +17,4 @@ Widgets.lua
 Hud.lua
 UI.lua
 Minimap.lua
+Practice.lua

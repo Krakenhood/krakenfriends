@@ -30,6 +30,7 @@ local lastRage
 local function now() return GetTime() end
 
 local function readSpeed()
+    if W.fixedSpeed then W.speed = W.fixedSpeed; return end -- practice mode's weapon
     local mh = call(UnitAttackSpeed, "player")
     if type(mh) == "number" and mh > 0 then W.speed = mh end
 end

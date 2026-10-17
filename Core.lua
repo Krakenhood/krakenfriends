@@ -139,6 +139,17 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     for i = 1, #list do dispatch(list[i], ...) end
 end)
 
+-- Hands a made-up game event to the handlers, as if the game had sent it. Practice
+-- mode plays its fights through here, so they run through the real code.
+-- KR.injecting tells a handler the event didn't come from the game.
+function KR:Inject(event, ...)
+    local list = events[event]
+    if not list then return end
+    self.injecting = true
+    for i = 1, #list do dispatch(list[i], ...) end
+    self.injecting = false
+end
+
 function KR:Listen(msg, fn)
     listeners[msg] = listeners[msg] or {}
     table.insert(listeners[msg], fn)
@@ -249,6 +260,7 @@ local HELP = {
     { "/kr toasts", "turn the note after each fight on or off" },
     { "/kr minimap", "show or hide the minimap button" },
     { "/kr demo", "add or remove sample fights, to preview the coach" },
+    { "/kr practice", "play pretend fights as a warrior, on any character" },
     { "/kr clear", "forget this character's fights" },
     { "/kr debug", "print what the coach sees to chat" },
 }
@@ -291,6 +303,7 @@ local commands = {
     end,
     debug = function() toggle(KR.db.settings, "debug", "Debug output") end,
     demo = function() KR.Coach:ToggleDemo() end,
+    practice = function() KR.Practice:Toggle() end,
     clear = function()
         wipe(KR.char.fights)
         KR:Print("Fights forgotten.")
@@ -307,8 +320,9 @@ SLASH_KRAKENRAGE2 = "/krakenrage"
 SlashCmdList.KRAKENRAGE = function(msg)
     msg = strtrim(tostring(msg or "")):lower()
     local cmd, arg = msg:match("^(%S*)%s*(.-)$")
+    if cmd == "practice" and KR.db then return commands.practice() end
     if not KR.active then
-        KR:Print(KR.notWarrior and "Krakenrage is made for warriors; it stays asleep on this character." or "not ready yet.")
+        KR:Print(KR.notWarrior and "Krakenrage is made for warriors; it stays asleep on this character. /kr practice lets you try it anyway." or "not ready yet.")
         return
     end
     if cmd == "" then

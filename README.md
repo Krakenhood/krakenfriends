@@ -2,6 +2,8 @@
 
 A rage bar and a coach for the **warrior** in **World of Warcraft: Forever**, in the game's own style (gold border, dark stone, the fantasy font), like KrakenChat.
 
+![The rage bar: Overpower lit after a dodge](assets/screenshots/1-rage-bar-overpower.png)
+
 ## The rage bar
 
 - **Your rage, with a tick for each ability.** Every ability you use gets a tick at its real rage cost, read from the game, so talents like Improved Heroic Strike move it. The ability's icon sits above the tick and lights up when you can press it: enough rage, the right stance, off cooldown. Abilities that cost the same share a tick (Execute and Sunder Armor at 15, Overpower and Revenge at 5).
@@ -30,7 +32,17 @@ A short note pops up above the bar after each fight of ten seconds or more ("2 t
 
 **History**: the last 200 fights per character. The window lists the newest 12; click one to read it again. **Trends** compare your last 10 fights with the 10 before: grade, Overpower and Revenge use, rage wasted per minute, Battle Shout uptime, each marked better or worse.
 
+![The coach grading a sloppy fight](assets/screenshots/6-coach-last-fight.png)
+
 `/kr demo` fills the coach with twelve sample fights (a warrior who gets better fight by fight), good for a first look and for screenshots. `/kr demo` again removes them.
+
+## Practice mode: be a warrior without one
+
+`/kr practice` works on **any character**, not just warriors. It turns you into a pretend level 30 Arms warrior and plays a fight against a pretend foe every 45 seconds, so the whole addon comes alive: rage filling and draining, the ticks lighting up, Charge, Battle Shout, Sunder Armor, the dodge that lights Overpower, Heroic Strike queued on the swing timer, a stance switch with its rage cost, the Execute phase, and the coach grading each fight with the note above the bar.
+
+Every other fight is sloppy on purpose: an Overpower let go, no Battle Shout, rage sitting at 100, a stance switch with a full bar, a Heroic Strike in the Execute phase. That way the coach has something to say, and the clean fights after it show up as "better" in the trends.
+
+The fights go through the real code: practice only stands in for the game (rage, stance, cooldowns, the target, buffs) and hands the bar, the swing timer and the coach the same events a real fight would. Practice fights are kept, marked "practice". `/kr practice` again stops it, and so does any real fight.
 
 ## How it sees the fight
 
@@ -57,6 +69,7 @@ A short note pops up above the bar after each fight of ten seconds or more ("2 t
 | `/kr toasts` | Turn the note after each fight on or off |
 | `/kr minimap` | Show or hide the minimap button |
 | `/kr demo` | Add or remove sample fights |
+| `/kr practice` | Start or stop practice mode (pretend warrior fights, on any character) |
 | `/kr clear` | Forget this character's fights |
 | `/kr debug` | Print what the coach sees (chances, swings, stance costs) to chat |
 
@@ -64,7 +77,16 @@ The minimap button opens the coach. Right-click it to lock or unlock the bar.
 
 ## Install
 
-Copy the `Krakenrage` folder into the game's `Interface\AddOns` folder, then log in with a warrior. On other classes the addon stays asleep.
+Copy the `Krakenrage` folder into the game's `Interface\AddOns` folder, then log in with a warrior. On other classes the addon stays asleep until you type `/kr practice`.
+
+## Screenshots
+
+`assets/screenshots/` holds pictures of every part: the bar with Overpower lit, Heroic Strike queued, rage capped and the Execute alert; the note after a fight; and the coach's three pages. They're drawn from a real practice run: `tools/screenshots/shots.js` plays practice mode headless, records what the addon shows (rage, ticks and which are lit, the swing timer, alerts, the coach's grades, tips and trends) and draws it in the layout of `Hud.lua` and `UI.lua`. The game's fonts, textures and spell icons aren't available outside the game, so the icons are tinted stand-ins with the ability's short name. In the game you see the real spell icons.
+
+```
+cd tests && npm install && cd ..
+node tools/screenshots/shots.js
+```
 
 ## Icon
 
@@ -80,7 +102,7 @@ npm install
 npm test
 ```
 
-It covers a non-warrior staying asleep, ticks at talented costs, Overpower used, missed and starved, Revenge, the Execute phase, rage capped, stance-switch costs and learning what you keep, Sunder Armor, the swing timer, Heroic Strike starving your big ability, grades and tips, secret values, the window, demo fights and trends, and the commands.
+It covers a non-warrior staying asleep, practice mode on a mage (two full fights, the sloppy one graded worse, a real fight ending it), ticks at talented costs, Overpower used, missed and starved, Revenge, the Execute phase, rage capped, stance-switch costs and learning what you keep, Sunder Armor, the swing timer, Heroic Strike starving your big ability, grades and tips, secret values, the window, demo fights and trends, and the commands.
 
 ## Known limits
 

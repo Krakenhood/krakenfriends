@@ -115,15 +115,14 @@ local function sampleWindow(kind, w, stanceKey, rage)
 end
 
 local function targetInfo(F)
-    if not call(UnitExists, "target") or not call(UnitCanAttack, "player", "target") then return nil end
-    local name = call(UnitName, "target")
-    if type(name) ~= "string" then return nil end
+    local name, cls, lv, guid, dead = S:Target()
+    if not name then return nil end
     local t = F.targets[name]
     if not t then
-        t = { s = 0, cls = call(UnitClassification, "target"), lv = call(UnitLevel, "target") }
+        t = { s = 0, cls = cls, lv = lv }
         F.targets[name] = t
     end
-    return t, call(UnitGUID, "target")
+    return t, guid, dead
 end
 
 local sunderGUID, sunderLast = nil, 0
@@ -149,7 +148,7 @@ local function tick()
     end
 
     -- the target: who you fought, the Execute phase, Sunder Armor
-    local target, guid = targetInfo(F)
+    local target, guid, dead = targetInfo(F)
     if target then target.s = target.s + dt end
     local exec = false
     if target and S:Known("execute") then
@@ -173,7 +172,7 @@ local function tick()
             if guid ~= sunderGUID then sunderGUID, sunderLast = guid, stacks end
             if stacks > F.sunder.max then F.sunder.max = stacks end
             if stacks >= 5 and not F.sunder.to5 and F.sunder.first then F.sunder.to5 = t - F.sunder.first end
-            if sunderLast > 0 and stacks == 0 and not call(UnitIsDead, "target") then F.sunder.drops = F.sunder.drops + 1 end
+            if sunderLast > 0 and stacks == 0 and not dead then F.sunder.drops = F.sunder.drops + 1 end
             sunderLast = stacks
         end
     end
@@ -231,6 +230,16 @@ function C:Stop()
     if record.dur >= TOAST_FIGHT then KR:Fire("FIGHT_DONE", record) end
 end
 
+-- Drops the fight going on without keeping it.
+function C:Abort()
+    if not self.fight then return end
+    if ticker then ticker:Cancel(); ticker = nil end
+    wipe(self.windows)
+    self.fight = nil
+    if self.execute then self.execute = false; KR:Fire("PROC", "ex", false) end
+    KR:Fire("COMBAT", false)
+end
+
 -- What's worth keeping of a fight, with its score.
 function C:Finish(F)
     local name, best = nil, -1
@@ -246,6 +255,7 @@ function C:Finish(F)
         shout = F.shout.known and F.shout.seen and { up = F.shout.up } or nil,
         sunder = F.sunder.casts > 0 and { casts = F.sunder.casts, max = F.sunder.max, to5 = F.sunder.to5, drops = F.sunder.drops } or nil,
         hs = F.hs, starved = F.starved, casts = F.casts, spent = F.spent,
+        practice = KR.practice or nil,
     }
     for n in pairs(F.targets) do if n ~= name then r.adds = r.adds + 1 end end
     r.score = self:Score(r)

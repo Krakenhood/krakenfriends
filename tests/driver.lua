@@ -48,6 +48,49 @@ check(MAGE.Hud.frame == nil, "no bar for a mage")
 SlashCmdList.KRAKENRAGE("")
 check(CHAT[#CHAT]:find("made for warriors") ~= nil, "slash command explains")
 
+section("practice mode on a mage")
+SlashCmdList.KRAKENRAGE("practice")
+check(MAGE.practice and MAGE.active, "practice wakes the addon")
+check(MAGE.Hud.frame and MAGE.Hud.frame:IsShown(), "the bar is there")
+local pc = {}
+for _, t in ipairs(MAGE.Hud.ticks) do pc[#pc + 1] = t.cost end
+check(table.concat(pc, ",") == "5,12,15,30", "the pretend warrior's ticks: " .. table.concat(pc, ","))
+local sawOP, sawEx, sawCap, sawSwing, sawToast = false, false, false, false, false
+for i = 1, 950 do -- two fights and their breaks
+    Run(0.1, MAGE)
+    if TRACE and i % 10 == 0 then
+        local f = MAGE.Coach.fight
+        print(("  t=%3d rage=%3s stance=%s fight=%s op=%s ex=%s"):format(i / 10, tostring(MAGE.Spells:Rage()), tostring(MAGE.Spells:StanceKey()), tostring(f ~= nil), tostring(MAGE.Coach.windows.op ~= nil), tostring(MAGE.Coach.execute)))
+    end
+    if MAGE.Coach.windows.op then sawOP = true end
+    if MAGE.Coach.execute then sawEx = true end
+    if MAGE.Spells:Rage() == 100 then sawCap = true end
+    if MAGE.Swing:Progress() then sawSwing = true end
+    if KrakenrageToast and KrakenrageToast:IsShown() then sawToast = true end
+end
+check(sawOP and sawEx and sawCap and sawSwing, ("Overpower %s, Execute %s, full rage %s, swings %s"):format(tostring(sawOP), tostring(sawEx), tostring(sawCap), tostring(sawSwing)))
+local pf = MAGE.char.fights
+check(#pf == 2 and pf[1].practice and pf[2].practice, "two practice fights graded: " .. #pf)
+if #pf == 2 then
+    local sloppy, clean = pf[1], pf[2]
+    print(("  sloppy: %s %s, clean: %s %s"):format(MAGE.Coach.Grade(sloppy.score), tostring(sloppy.score), MAGE.Coach.Grade(clean.score), tostring(clean.score)))
+    print(("  sloppy capped %.1f loss %d exec.hs %d | clean sunder %s shout %s exec %d"):format(sloppy.capped, sloppy.stanceLoss, sloppy.exec.hs, tostring(clean.sunder and clean.sunder.max), tostring(clean.shout and clean.shout.up), clean.exec.casts))
+    print(("  op sloppy win %d used %d missed %d starved %d other %d | clean win %d used %d missed %d starved %d"):format(sloppy.op.win, sloppy.op.used, sloppy.op.missed, sloppy.op.starved, sloppy.op.other, clean.op.win, clean.op.used, clean.op.missed, clean.op.starved))
+    check(clean.score > sloppy.score, "the clean fight grades better")
+    check(sloppy.op.missed >= 1 and clean.op.missed == 0 and clean.op.used >= 1, "Overpower missed only in the sloppy fight")
+    check(sloppy.capped >= 3 and sloppy.stanceLoss > 0 and sloppy.exec.hs == 1, "the sloppy fight's mistakes")
+    check(clean.sunder.max == 5 and clean.shout and clean.shout.up > 25, "the clean fight's Sunders and Battle Shout")
+    check(clean.exec.casts >= 2, "Executes in the clean fight")
+    for _, t in ipairs(MAGE.Coach:Tips(sloppy)) do print("    " .. t.level .. ": " .. t.text) end
+end
+check(sawToast, "the note after a practice fight")
+FireEvent("PLAYER_REGEN_DISABLED") -- a real fight
+check(not MAGE.practice and not MAGE.active, "a real fight ends practice")
+check(not MAGE.Hud.frame:IsShown(), "the bar goes away again")
+FireEvent("PLAYER_REGEN_ENABLED")
+check(#MAGE.char.fights == 2, "nothing recorded from the real fight")
+KrakenrageToast:Hide()
+
 --------------------------------------------------------------------------------
 section("warrior login")
 KrakenrageDB, KrakenrageCharDB = nil, nil
@@ -145,7 +188,7 @@ check(C.fight.hs == 1 and C.fight.starved == 1, "Heroic Strike left Mortal Strik
 
 -- full rage for 3 seconds
 SetRage(100)
-Run(3, KR)
+Run(3.5, KR)
 check(C.fight.capped >= 2.9, "time at full rage counted: " .. C.fight.capped)
 
 -- stance switch to Defensive with Tactical Mastery keeping 10
