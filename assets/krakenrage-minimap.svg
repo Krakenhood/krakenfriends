@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Krakenrage minimap icon (no rim: the minimap button has its own ring; zoomed in to fill it): the Krakenfriends kraken raising a sword, a red glow of rage behind it.
+       Made to stay readable at minimap size (about 18 px). -->
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#2aa6a0"/>
+    </linearGradient>
+    <linearGradient id="arm" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#2aa6a0"/><stop offset="1" stop-color="#7c5be0"/>
+    </linearGradient>
+    <radialGradient id="stone" cx="0.45" cy="0.42" r="0.7">
+      <stop offset="0" stop-color="#4a4036"/><stop offset="0.65" stop-color="#2a241e"/><stop offset="1" stop-color="#14110e"/>
+    </radialGradient>
+    <radialGradient id="rage" cx="0.62" cy="0.36" r="0.5">
+      <stop offset="0" stop-color="#ff4a2e" stop-opacity=".85"/><stop offset="0.55" stop-color="#b3140c" stop-opacity=".45"/><stop offset="1" stop-color="#b3140c" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f5d77a"/><stop offset="0.5" stop-color="#c99a2e"/><stop offset="1" stop-color="#7a5714"/>
+    </linearGradient>
+    <linearGradient id="blade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f1f5f9"/><stop offset="0.5" stop-color="#cbd5e1"/><stop offset="1" stop-color="#7c8796"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#stone)"/>
+  <rect width="512" height="512" fill="url(#rage)"/>
+  <g fill="#000" fill-opacity=".18">
+    <ellipse cx="120" cy="420" rx="120" ry="40"/><ellipse cx="300" cy="460" rx="90" ry="26"/>
+  </g>
+  <g transform="translate(256 262) scale(0.92) translate(-258 -268)">
+  <!-- tentacles below the head -->
+  <g fill="none" stroke="url(#arm)" stroke-width="30" stroke-linecap="round">
+    <path d="M92 400 C70 440 40 448 36 480"/>
+    <path d="M150 420 C146 456 128 476 140 500"/>
+    <path d="M214 410 C232 450 262 462 258 494"/>
+  </g>
+  <!-- the sword, raised to the upper right -->
+  <g transform="rotate(35 352 250)">
+    <path d="M336 -20 L368 -20 L368 200 L352 232 L336 200 Z" transform="rotate(180 352 121)" fill="url(#blade)" stroke="#1f2937" stroke-width="6" stroke-linejoin="round"/>
+    <line x1="352" y1="10" x2="352" y2="196" stroke="#ffffff" stroke-opacity=".55" stroke-width="5" transform="rotate(180 352 121)"/>
+    <rect x="292" y="254" width="120" height="24" rx="10" fill="url(#gold)" stroke="#3b2a0a" stroke-width="5"/>
+    <rect x="340" y="276" width="24" height="60" rx="6" fill="#5b3b1e" stroke="#2a1a0a" stroke-width="5"/>
+    <circle cx="352" cy="346" r="16" fill="url(#gold)" stroke="#3b2a0a" stroke-width="5"/>
+  </g>
+  <!-- the arm gripping the hilt -->
+  <path d="M262 340 C320 344 340 326 324 300" fill="none" stroke="url(#arm)" stroke-width="36" stroke-linecap="round"/>
+  <g fill="#c4b5fd" fill-opacity=".6"><circle cx="300" cy="334" r="6"/></g>
+  <!-- head -->
+  <path d="M40 330 C40 214 100 168 168 168 C236 168 296 214 296 330 C296 382 252 412 168 412 C84 412 40 382 40 330Z" fill="url(#body)"/>
+  <path d="M76 250 C98 214 130 194 168 192" fill="none" stroke="#ffffff" stroke-opacity=".35" stroke-width="10" stroke-linecap="round"/>
+  <!-- eyes under fierce brows -->
+  <ellipse cx="124" cy="312" rx="32" ry="34" fill="#f8fafc"/><ellipse cx="214" cy="312" rx="32" ry="34" fill="#f8fafc"/>
+  <circle cx="134" cy="306" r="17" fill="#1e1b4b"/><circle cx="224" cy="306" r="17" fill="#1e1b4b"/>
+  <circle cx="140" cy="299" r="6" fill="#fff"/><circle cx="230" cy="299" r="6" fill="#fff"/>
+  <path d="M86 268 L158 290" stroke="#134e4a" stroke-width="14" stroke-linecap="round"/>
+  <path d="M252 268 L180 290" stroke="#134e4a" stroke-width="14" stroke-linecap="round"/>
+  <!-- a determined grin -->
+  <path d="M136 368 Q169 382 202 368" fill="none" stroke="#134e4a" stroke-width="8" stroke-linecap="round"/>
+  </g>
+</svg>

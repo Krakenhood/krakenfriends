@@ -1,0 +1,11 @@
+{
+  "name": "krakenrage-tests",
+  "private": true,
+  "scripts": {
+    "test": "node run.js",
+    "compat": "node compat.js"
+  },
+  "dependencies": {
+    "fengari": "^0.1.5"
+  }
+}

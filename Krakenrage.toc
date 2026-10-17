@@ -1,0 +1,19 @@
+## Interface: 16001
+## Title: |cff4fd1c5Kraken|rrage
+## Notes: A rage bar for the warrior that shows what you can afford, the moments that matter (Overpower, Revenge, Execute) and a coach that tells you after each fight what went well and what didn't.
+## Author: Bernhard
+## Version: 0.1.0
+## IconTexture: Interface\AddOns\Krakenrage\Media\icon
+## AddonCompartmentFunc: Krakenrage_OnAddonCompartmentClick
+## SavedVariables: KrakenrageDB
+## SavedVariablesPerCharacter: KrakenrageCharDB
+
+Core.lua
+Data.lua
+Spells.lua
+Swing.lua
+Coach.lua
+Widgets.lua
+Hud.lua
+UI.lua
+Minimap.lua
